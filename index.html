@@ -734,7 +734,7 @@ function doByopImport(){
   }
 
   if(!parsed || (!parsed.kits && !parsed.supplies)){
-    showMsg(false, '✗ Wrong format — export must come from byopinventory.netlify.app');
+    showMsg(false, '✗ Wrong format — export must come from ampmadvance.github.io/byop-inventory');
     return;
   }
 
@@ -823,7 +823,7 @@ function importByopData(){
 
   // Validate structure
   if(!parsed || (!parsed.kits && !parsed.supplies)){
-    showResult(false, '✗ Wrong data format — this JSON does not look like BYOP inventory data. Make sure you exported from byopinventory.netlify.app');
+    showResult(false, '✗ Wrong data format — this JSON does not look like BYOP inventory data. Make sure you exported from ampmadvance.github.io/byop-inventory');
     return;
   }
 
@@ -1840,16 +1840,16 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
         <!-- AMPM Print Sync Banner -->
         <div style="background:linear-gradient(135deg,rgba(167,139,250,0.07),rgba(167,139,250,0.03));border:1px solid rgba(167,139,250,0.2);border-radius:var(--r2);padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
-            <div style="font-size:12px;font-weight:700;color:#A78BFA;margin-bottom:2px">🔗 T-Shirt Inventory App — ampminventory.netlify.app</div>
+            <div style="font-size:12px;font-weight:700;color:#A78BFA;margin-bottom:2px">🔗 T-Shirt Inventory App — ampmadvance.github.io/ampm-inventory</div>
             <div style="font-size:11px;color:var(--t2)">Manage your Gildan and Bella Canvas stock. Updates here sync to your net worth automatically.</div>
           </div>
           <div style="display:flex;gap:8px;flex-shrink:0">
-            <a href="https://ampminventory.netlify.app" target="_blank" style="padding:6px 13px;border-radius:8px;font-size:11px;font-weight:700;color:#A78BFA;background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.25);text-decoration:none;display:inline-flex;align-items:center;gap:5px">↗ Open App</a>
+            <a href="https://ampmadvance.github.io/ampm-inventory" target="_blank" style="padding:6px 13px;border-radius:8px;font-size:11px;font-weight:700;color:#A78BFA;background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.25);text-decoration:none;display:inline-flex;align-items:center;gap:5px">↗ Open App</a>
           </div>
         </div>
 
         <div class="inv-connect" style="border-color:rgba(167,139,250,0.2);background:linear-gradient(135deg,rgba(167,139,250,0.06),rgba(167,139,250,0.02))">
-          <div style="font-size:13px;font-weight:700;color:#A78BFA;margin-bottom:4px">🔗 Sync from ampminventory.netlify.app</div>
+          <div style="font-size:13px;font-weight:700;color:#A78BFA;margin-bottom:4px">🔗 Sync from ampmadvance.github.io/ampm-inventory</div>
           <div style="font-size:11px;color:var(--t2);margin-bottom:10px">Paste your Google Apps Script URL — Gildan G5000 = $2.50 each, Bella Canvas 3001C = $3.00 each. Updates AMPM Print net worth in real time.</div>
           <div class="inv-url-row">
             <input id="sheets-url" placeholder="https://script.google.com/macros/s/YOUR_URL/exec" value="">
@@ -1905,11 +1905,11 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
       <!-- BYOP Sync Banner -->
       <div style="background:linear-gradient(135deg,rgba(201,168,76,0.07),rgba(201,168,76,0.03));border:1px solid rgba(201,168,76,0.18);border-radius:var(--r2);padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
         <div>
-          <div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:2px">🔗 BYOP Inventory App — byopinventory.netlify.app</div>
+          <div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:2px">🔗 BYOP Inventory App — ampmadvance.github.io/byop-inventory</div>
           <div style="font-size:11px;color:var(--t2)">Update quantities on the app, export, then import here to sync. After Supabase setup this will be automatic.</div>
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0">
-          <a href="https://byopinventory.netlify.app" target="_blank" style="padding:6px 13px;border-radius:8px;font-size:11px;font-weight:700;color:var(--gold);background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.25);text-decoration:none">↗ Open App</a>
+          <a href="https://ampmadvance.github.io/byop-inventory" target="_blank" style="padding:6px 13px;border-radius:8px;font-size:11px;font-weight:700;color:var(--gold);background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.25);text-decoration:none">↗ Open App</a>
           <button class="btn-sm btn-ghost" onclick="toggleByopSyncPanel()">📥 Import from BYOP App</button>
           <button class="btn-sm btn-gold" onclick="doByopExport()">📤 Export to BYOP App</button>
         </div>
@@ -1917,9 +1917,9 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
       <!-- BYOP SYNC — ultra simple, no JS attributes -->
       <div id="byop-sync-panel" style="display:none;background:#1D1A24;border:1px solid rgba(201,168,76,0.3);border-radius:14px;padding:16px;margin-bottom:12px">
-        <div style="font-size:11px;font-weight:700;color:#C9A84C;margin-bottom:10px">📥 Import from byopinventory.netlify.app</div>
+        <div style="font-size:11px;font-weight:700;color:#C9A84C;margin-bottom:10px">📥 Import from ampmadvance.github.io/byop-inventory</div>
         <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:8px;line-height:1.7">
-          1. Go to byopinventory.netlify.app → click <strong style="color:white">📤 Export to Dashboard</strong> → <strong style="color:white">Copy to Clipboard</strong><br>
+          1. Go to ampmadvance.github.io/byop-inventory → click <strong style="color:white">📤 Export to Dashboard</strong> → <strong style="color:white">Copy to Clipboard</strong><br>
           2. Paste below → click Sync
         </div>
         <textarea id="byop-paste-area" placeholder="Paste exported JSON here..." style="width:100%;height:100px;background:#0F0D13;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:white;padding:10px;font-size:11px;font-family:monospace;resize:vertical;box-sizing:border-box;display:block"></textarea>
