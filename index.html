@@ -1,0 +1,3442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AMPM Advance — Net Worth Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js">
+
+// ══════════════════════════════════════════════════
+// EBAY STORE — LIVE FETCH VIA ANTHROPIC API
+// ══════════════════════════════════════════════════
+const EBAY_STORE_URL = 'https://www.ebay.com/str/basketsandthings';
+let ebayListings = JSON.parse(localStorage.getItem('ampm_ebay') || '[]');
+let ebaySales = JSON.parse(localStorage.getItem('ampm_ebay_sales') || '[]');
+
+function saveEbay(){
+  localStorage.setItem('ampm_ebay', JSON.stringify(ebayListings));
+  localStorage.setItem('ampm_ebay_sales', JSON.stringify(ebaySales));
+}
+
+function setEbayStatus(msg, type='loading'){
+  const el = document.getElementById('ebay-status-bar');
+  if(!el) return;
+  el.style.display='flex';
+  el.className='ebay-status-bar ' + (type==='ok'?'':type==='err'?'err':'loading');
+  el.innerHTML = (type==='loading'?'⟳ ':'✓ ') + msg;
+}
+
+async function fetchEbayStore(){
+  setEbayStatus('Fetching live listings from eBay via Claude AI...', 'loading');
+  try{
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        tools:[{type:'web_search_20250305',name:'web_search'}],
+        system: 'You are a data extraction assistant. When given an eBay store URL, search for the store listings and return ONLY a valid JSON array of objects. Each object must have: title (string), price (number, USD), qty (number, default 1), category (string), imageUrl (string or empty). Return ONLY the JSON array, no markdown, no explanation.',
+        messages:[{
+          role:'user',
+          content: 'Search for eBay store "basketsandthings" and return all active listings as a JSON array. Fields: title, price (number), qty (number), category (string), imageUrl (string). Return ONLY valid JSON array.'
+        }]
+      })
+    });
+    const data = await response.json();
+    
+    // Extract text from response
+    let text = '';
+    data.content?.forEach(block => {
+      if(block.type === 'text') text += block.text;
+    });
+    
+    // Parse JSON from response
+    const jsonMatch = text.match(/\[.*\]/s);
+    if(jsonMatch){
+      const listings = JSON.parse(jsonMatch[0]);
+      ebayListings = listings;
+      saveEbay();
+      updateEbayKPIs();
+      renderEbayListings();
+      document.getElementById('ebay-kpis').style.display='grid';
+      document.getElementById('ebay-listings-wrap').style.display='block';
+      setEbayStatus('✓ ' + listings.length + ' listings fetched from ebay.com/str/basketsandthings', 'ok');
+      updateNWDisplay();
+      toast('eBay listings synced — ' + listings.length + ' active');
+    } else {
+      throw new Error('No JSON found in response');
+    }
+  } catch(err){
+    console.error(err);
+    setEbayStatus('Could not auto-fetch. Try "Use Sample Data" or add listings manually. (' + err.message + ')', 'err');
+    toast('Fetch failed — use sample or add manually');
+  }
+}
+
+function loadEbaySample(){
+  ebayListings = [
+    {title:'Dove Men+Care Body Wash, Clean Comfort 30oz (Pack of 4)', price:22.99, qty:3, category:'Health & Beauty', imageUrl:''},
+    {title:'Copic Sketch Markers Set 12 Colors — Anime Comic Art Markers', price:48.00, qty:2, category:'Art & Craft', imageUrl:''},
+    {title:'Dove Sensitive Skin Body Wash 20oz (Lot of 6)', price:18.99, qty:5, category:'Health & Beauty', imageUrl:''},
+    {title:'Prismacolor Premier Colored Pencils 48 Count', price:29.99, qty:4, category:'Art Supplies', imageUrl:''},
+    {title:'OGX Argan Oil of Morocco Shampoo 13oz', price:12.50, qty:8, category:'Health & Beauty', imageUrl:''},
+    {title:'Chameleon Color Tones Markers 22pc Professional Set', price:35.00, qty:2, category:'Art & Craft', imageUrl:''},
+    {title:'Dove Beauty Bar White 4oz (12-Pack)', price:14.99, qty:6, category:'Health & Beauty', imageUrl:''},
+    {title:'Winsor & Newton Watercolor Tubes Set 24 Colors', price:31.50, qty:3, category:'Art Supplies', imageUrl:''},
+    {title:'Neutrogena Hydro Boost Gel Cream 1.7oz', price:16.99, qty:4, category:'Skincare', imageUrl:''},
+    {title:'Arteza Real Brush Pens 48 Colors Watercolor', price:24.99, qty:5, category:'Art & Craft', imageUrl:''},
+    {title:'Ivory Bar Soap Original 4oz (16-Pack)', price:13.49, qty:7, category:'Health & Beauty', imageUrl:''},
+    {title:'Staedtler Triplus Fineliner Pens 20 Colors', price:17.99, qty:6, category:'Art Supplies', imageUrl:''},
+  ];
+  saveEbay();
+  updateEbayKPIs();
+  renderEbayListings();
+  document.getElementById('ebay-kpis').style.display='grid';
+  document.getElementById('ebay-listings-wrap').style.display='block';
+  setEbayStatus('Sample data loaded — 12 listings. Hit "Fetch Live Listings" to get real data.', 'ok');
+  updateNWDisplay();
+  toast('Sample eBay data loaded ✓');
+}
+
+function updateEbayKPIs(){
+  const count = ebayListings.length;
+  const totalVal = ebayListings.reduce((s,l)=>s+(l.price||0)*(l.qty||1),0);
+  const totalQty = ebayListings.reduce((s,l)=>s+(l.qty||1),0);
+  const avg = count>0? totalVal/count : 0;
+  
+  const ec = document.getElementById('ebay-count');
+  const ev = document.getElementById('ebay-value');
+  const eq = document.getElementById('ebay-qty');
+  const ea = document.getElementById('ebay-avg');
+  if(ec) ec.textContent = count;
+  if(ev) ev.textContent = fmt(totalVal);
+  if(eq) eq.textContent = totalQty;
+  if(ea) ea.textContent = '$'+avg.toFixed(0);
+}
+
+function renderEbayListings(){
+  const grid = document.getElementById('ebay-grid');
+  if(!grid) return;
+  
+  const sortVal = document.getElementById('ebay-sort')?.value || 'price-desc';
+  const searchQ = (document.getElementById('ebay-search')?.value||'').toLowerCase();
+  
+  let listings = [...ebayListings];
+  if(searchQ) listings = listings.filter(l=>l.title.toLowerCase().includes(searchQ));
+  if(sortVal==='price-desc') listings.sort((a,b)=>b.price-a.price);
+  else if(sortVal==='price-asc') listings.sort((a,b)=>a.price-b.price);
+  else listings.sort((a,b)=>a.title.localeCompare(b.title));
+  
+  if(!listings.length){
+    grid.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--t3);padding:24px">No listings found</div>';
+    return;
+  }
+  
+  // Category emojis
+  const catEmoji=(cat)=>{
+    const c=(cat||'').toLowerCase();
+    if(c.includes('art')||c.includes('craft')||c.includes('marker')||c.includes('supply'))return'🎨';
+    if(c.includes('health')||c.includes('beauty')||c.includes('skin'))return'🧴';
+    if(c.includes('soap')||c.includes('wash'))return'🫧';
+    if(c.includes('electronic'))return'⚡';
+    return'📦';
+  };
+  
+  grid.innerHTML = listings.map((l,i)=>`
+    <div class="ebay-card" onclick="openEbayDetail(${ebayListings.indexOf(l)})">
+      <div class="ebay-card-img">
+        ${l.imageUrl?`<img src="${l.imageUrl}" alt="${l.title}" onerror="this.parentElement.innerHTML='${catEmoji(l.category)}'">`:catEmoji(l.category)}
+      </div>
+      <div class="ebay-card-body">
+        <div class="ebay-card-title">${l.title}</div>
+        <div class="ebay-card-price">$${(l.price||0).toFixed(2)}</div>
+        <div class="ebay-card-qty">Qty: ${l.qty||1} · ${l.category||'Misc'}</div>
+        <div class="ebay-card-sold">ACTIVE</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openEbayDetail(i){
+  const l = ebayListings[i];
+  if(!l) return;
+  // Could open a modal — for now just open eBay search
+  const q = encodeURIComponent(l.title.slice(0,40));
+  window.open('https://www.ebay.com/str/basketsandthings', '_blank');
+}
+
+function addEbayManual(){
+  const title = document.getElementById('ebay-title').value;
+  const price = parseFloat(document.getElementById('ebay-price').value)||0;
+  const qty = parseInt(document.getElementById('ebay-qty-add').value)||1;
+  const category = document.getElementById('ebay-cat').value;
+  const imageUrl = document.getElementById('ebay-img').value;
+  if(!title){toast('Enter item title');return;}
+  ebayListings.push({title,price,qty,category,imageUrl});
+  saveEbay();
+  closeModal('add-ebay-modal');
+  updateEbayKPIs();
+  renderEbayListings();
+  document.getElementById('ebay-kpis').style.display='grid';
+  document.getElementById('ebay-listings-wrap').style.display='block';
+  updateNWDisplay();
+  toast('Listing added ✓');
+  document.getElementById('ebay-title').value='';
+}
+
+function logEbaySale(){
+  const title = document.getElementById('sale-title').value;
+  const price = parseFloat(document.getElementById('sale-price').value)||0;
+  const fees = parseFloat(document.getElementById('sale-fees').value)||0;
+  const date = document.getElementById('sale-date').value || new Date().toISOString().slice(0,10);
+  const cost = parseFloat(document.getElementById('sale-cost').value)||0;
+  if(!title||!price){toast('Enter title and price');return;}
+  
+  const netProfit = price - fees - cost;
+  const sale = {title,price,fees,cost,netProfit,date};
+  ebaySales.unshift(sale);
+  saveEbay();
+  
+  // Also log as Nifty income transaction
+  S.transactions.unshift({desc:'eBay: '+title.slice(0,40),amt:price-fees,type:'income',biz:'nifty',date,icon:'📦'});
+  saveState();
+  
+  renderNiftySalesLog();
+  renderRecentTx();
+  updateNWDisplay();
+  closeModal('add-ebay-sale-modal');
+  toast('Sale logged — net: $'+netProfit.toFixed(2));
+}
+
+function renderNiftySalesLog(){
+  const el = document.getElementById('nifty-sales-log');
+  if(!el) return;
+  if(!ebaySales.length){
+    el.innerHTML='<div style="font-size:11px;color:var(--t3);text-align:center;padding:14px">No sales logged yet</div>';
+    return;
+  }
+  const totalNet = ebaySales.reduce((s,s2)=>s+s2.netProfit,0);
+  el.innerHTML=`<div style="display:flex;gap:16px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+    <div><div style="font-size:9px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em">Total Sales</div><div style="font-size:18px;font-weight:800;color:var(--green)">${fmt(ebaySales.reduce((s,s2)=>s+s2.price,0))}</div></div>
+    <div><div style="font-size:9px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em">Net Profit</div><div style="font-size:18px;font-weight:800;color:var(--gold)">${fmt(totalNet)}</div></div>
+    <div><div style="font-size:9px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em">Sales Count</div><div style="font-size:18px;font-weight:800">${ebaySales.length}</div></div>
+  </div>`+
+  ebaySales.slice(0,10).map(s=>`
+    <div class="tx-item">
+      <div class="tx-icon">📦</div>
+      <div style="flex:1">
+        <div class="tx-desc">${s.title.slice(0,45)}</div>
+        <div class="tx-date">${new Date(s.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})} · Fees: $${(s.fees||0).toFixed(2)} · Cost: $${(s.cost||0).toFixed(2)}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="tx-amt in">$${s.price.toFixed(2)}</div>
+        <div style="font-size:10px;color:var(--gold)">Net $${s.netProfit.toFixed(2)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// PRINT SUB-TAB NAVIGATION
+function printSubTab(el, id){
+  document.querySelectorAll('.sub-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('#print-shirts,#print-equipment,#print-orders').forEach(s=>s.style.display='none');
+  document.getElementById('print-'+id).style.display='block';
+  if(id==='equipment') renderPrintEquipment();
+  if(id==='orders') renderPrintOrders();
+}
+
+function renderPrintEquipment(){
+  const el = document.getElementById('print-equipment-list');
+  if(!el) return;
+  const equip = S.assets.filter(a=>a.cat==='equipment'&&(a.biz==='ampm'||!a.biz));
+  if(!equip.length){el.innerHTML='<div style="color:var(--t3);text-align:center;padding:16px">Add equipment via + Asset button</div>';return;}
+  const total = equip.reduce((s,a)=>s+a.value,0);
+  el.innerHTML=`<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)"><span style="font-size:10px;color:var(--t2)">Total Equipment Value</span><span style="font-size:20px;font-weight:800;color:var(--violet);float:right">${fmt(total)}</span></div>`+
+  equip.map((a,i)=>`
+    <div class="sumrow">
+      <span class="sumrow-label">🖨️ ${a.name}</span>
+      <span class="sumrow-val">${fmt(a.value)}</span>
+    </div>
+  `).join('');
+}
+
+function renderPrintOrders(){
+  const el = document.getElementById('print-orders-list');
+  if(!el) return;
+  const orders = S.transactions.filter(t=>t.biz==='ampm'&&t.type==='income');
+  if(!orders.length){el.innerHTML='<div style="color:var(--t3);text-align:center;padding:16px">No print orders logged yet</div>';return;}
+  el.innerHTML = orders.map(t=>`
+    <div class="tx-item">
+      <div class="tx-icon">${t.icon||'🖨️'}</div>
+      <div style="flex:1"><div class="tx-desc">${t.desc}</div><div class="tx-date">${new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div></div>
+      <div class="tx-amt in">${fmt(t.amt)}</div>
+    </div>
+  `).join('');
+}
+
+// Include eBay stock value in net worth calculation (override invValue)
+const _origInvValue = invValue;
+function invValue(){
+  let v = _origInvValue();
+  // Add eBay listings value
+  ebayListings.forEach(l=>{ v += (l.price||0)*(l.qty||1)*0.5; }); // cost basis = 50% of list (conservative)
+  return v;
+}
+
+// Init eBay if data exists
+if(ebayListings.length>0){
+  setTimeout(()=>{
+    updateEbayKPIs();
+    renderEbayListings();
+    const kpis = document.getElementById('ebay-kpis');
+    const wrap = document.getElementById('ebay-listings-wrap');
+    if(kpis)kpis.style.display='grid';
+    if(wrap)wrap.style.display='block';
+    setEbayStatus('Loaded '+ebayListings.length+' cached listings. Click Fetch to refresh.','ok');
+    renderNiftySalesLog();
+  }, 200);
+}
+
+
+// ── MOBILE SIDEBAR TOGGLE ──
+function toggleSidebar(){
+  const sb = document.querySelector('.sidebar');
+  const ov = document.getElementById('sidebar-overlay');
+  const open = sb.classList.toggle('open');
+  if(open){ ov.classList.add('open'); document.body.style.overflow='hidden'; }
+  else { ov.classList.remove('open'); document.body.style.overflow=''; }
+}
+function closeSidebarOnMobile(){
+  if(window.innerWidth<=700){
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('open');
+    document.body.style.overflow='';
+  }
+}
+window.addEventListener('resize',()=>{
+  if(window.innerWidth>700){
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('open');
+    document.body.style.overflow='';
+  }
+  try{if(nwChartInst)nwChartInst.resize();}catch(e){}
+  try{if(mixChartInst)mixChartInst.resize();}catch(e){}
+  try{if(holdingsChartInst)holdingsChartInst.resize();}catch(e){}
+});
+
+
+// ══════════════════════════════════════════════════
+// BYOP VIBES INVENTORY ENGINE
+// ══════════════════════════════════════════════════
+const BYOP_KEY = 'byop_dash_v1';
+
+let BS = {
+  kits: [
+    {id:1,name:'Hennessy Edition',type:'Regular',price:209,cost:82,stock:0,low:2,color:'Gold on Black',liquor:'Hennessy VS · 750ml',extras:'',emoji:'🥃'},
+    {id:2,name:'Patrón Edition',type:'Regular',price:199,cost:78,stock:0,low:2,color:'Silver/Orange',liquor:'Patrón Silver or Reposado · 750ml',extras:'',emoji:'🥃'},
+    {id:3,name:'Espolón Edition',type:'Regular',price:169,cost:68,stock:0,low:2,color:'Red/Black Art',liquor:'Espolón Blanco or Reposado · 750ml',extras:'',emoji:'🥃'},
+    {id:4,name:'Don Julio Edition',type:'Regular',price:219,cost:88,stock:0,low:2,color:'Sky Blue',liquor:'Don Julio Blanco or Reposado · 750ml',extras:'',emoji:'🥂'},
+    {id:5,name:'Casamigos Edition',type:'Regular',price:179,cost:72,stock:0,low:2,color:'Teal',liquor:'Casamigos Blanco or Reposado · 750ml',extras:'Teal-matched shot glasses',emoji:'🥃'},
+    {id:6,name:'Truth or Dare Espolón',type:'Double XL',price:325,cost:128,stock:0,low:1,color:'Red Double',liquor:'Espolón Blanco + Añejo · 2×750ml',extras:'UNO Truth,UNO Dare,2x BYOP Shaker,4x Shot Glasses,2x Tee',emoji:'🎲'},
+    {id:7,name:'Truth or Dare Patrón',type:'Double XL',price:325,cost:132,stock:0,low:1,color:'Silver+Orange',liquor:'Patrón Silver + Reposado · 2×750ml',extras:'UNO Truth,UNO Dare,2x BYOP Shaker,4x Shot Glasses,2x Tee',emoji:'🎲'},
+    {id:8,name:'Bird Gang Eagles Edition',type:'Limited',price:325,cost:130,stock:0,low:1,color:'Green on Green',liquor:'Bird Gang Tequila + 2×Cutwater RTD 4pk',extras:'UNO No Mercy,Do or Drink',emoji:'🦅'},
+    {id:9,name:'Don Julio Double XL',type:'Double XL',price:349,cost:140,stock:0,low:1,color:'Sky Blue Double',liquor:'Don Julio Blanco + Reposado · 2×750ml',extras:'2x UNO,2x Do or Drink,2x BYOP Shaker,4x Shot Glasses,2x Tee',emoji:'🥂'},
+    {id:10,name:'Casamigos Double XL',type:'Double XL',price:289,cost:115,stock:0,low:1,color:'Teal Double',liquor:'Casamigos Blanco + Reposado · 2×750ml',extras:'2x UNO,2x Do or Drink,2x BYOP Shaker,4x Shot Glasses,2x Tee',emoji:'🥃'},
+    {id:11,name:'Cutwater RTD Edition',type:'XL',price:289,cost:112,stock:0,low:1,color:'Mixed',liquor:'Cutwater Tequila + 2×RTD 4pk',extras:'2x BYOP Shaker,4x Shot Glasses',emoji:'🥤'},
+    {id:12,name:'Cutwater Double',type:'Double XL',price:319,cost:126,stock:0,low:1,color:'Double Bottle',liquor:'Cutwater Blanco + Reposado · 2×750ml',extras:'2x UNO,2x Do or Drink,2x BYOP Shaker,4x Shot Glasses,2x Tee',emoji:'🥤'},
+  ],
+  supplies: [
+    {id:1,name:'Acrylic Box — Regular',cat:'box',qty:0,low:5,cost:12,unit:'per box',variant:'Single bottle · Crystal Clear',emoji:'📦'},
+    {id:2,name:'Acrylic Box — XL / Double',cat:'box',qty:0,low:3,cost:18,unit:'per box',variant:'Double bottle · Crystal Clear',emoji:'📦'},
+    {id:3,name:'Hennessy VS',cat:'liquor',qty:0,low:3,cost:32,unit:'per bottle',variant:'750ml · Cognac',emoji:'🥃'},
+    {id:4,name:'Patrón Silver',cat:'liquor',qty:0,low:3,cost:38,unit:'per bottle',variant:'750ml',emoji:'🥃'},
+    {id:5,name:'Patrón Reposado',cat:'liquor',qty:0,low:2,cost:40,unit:'per bottle',variant:'750ml',emoji:'🥃'},
+    {id:6,name:'Espolón Blanco',cat:'liquor',qty:0,low:3,cost:22,unit:'per bottle',variant:'750ml',emoji:'🥃'},
+    {id:7,name:'Espolón Reposado',cat:'liquor',qty:0,low:2,cost:23,unit:'per bottle',variant:'750ml',emoji:'🥃'},
+    {id:8,name:'Don Julio Blanco',cat:'liquor',qty:0,low:2,cost:45,unit:'per bottle',variant:'750ml',emoji:'🥂'},
+    {id:9,name:'Don Julio Reposado',cat:'liquor',qty:0,low:2,cost:48,unit:'per bottle',variant:'750ml',emoji:'🥂'},
+    {id:10,name:'Casamigos Blanco',cat:'liquor',qty:0,low:3,cost:36,unit:'per bottle',variant:'750ml',emoji:'🥃'},
+    {id:11,name:'Casamigos Reposado',cat:'liquor',qty:0,low:2,cost:38,unit:'per bottle',variant:'750ml',emoji:'🥃'},
+    {id:12,name:'Cutwater Blanco',cat:'liquor',qty:0,low:2,cost:26,unit:'per bottle',variant:'750ml',emoji:'🥤'},
+    {id:13,name:'Cutwater Reposado',cat:'liquor',qty:0,low:2,cost:28,unit:'per bottle',variant:'750ml',emoji:'🥤'},
+    {id:14,name:'Bird Gang Habanero Tequila',cat:'liquor',qty:0,low:2,cost:35,unit:'per bottle',variant:'750ml · Limited',emoji:'🦅'},
+    {id:15,name:'Cutwater RTD 4-Pack',cat:'rtd',qty:0,low:4,cost:14,unit:'per 4pk',variant:'Lime Marg / Strawberry / Paloma / Mango',emoji:'🥫'},
+    {id:16,name:'UNO — Standard',cat:'games',qty:0,low:10,cost:6.50,unit:'per deck',variant:'Dare/Liars/Flip/Party/99/Flex',emoji:'🃏'},
+    {id:17,name:'UNO No Mercy',cat:'games',qty:0,low:5,cost:8,unit:'per deck',variant:'Eagles Edition',emoji:'🃏'},
+    {id:18,name:'UNO Truth',cat:'games',qty:0,low:5,cost:9,unit:'per deck',variant:'Truth or Dare exclusive',emoji:'🃏'},
+    {id:19,name:'UNO Dare',cat:'games',qty:0,low:5,cost:9,unit:'per deck',variant:'Truth or Dare exclusive',emoji:'🃏'},
+    {id:20,name:'Do or Drink',cat:'games',qty:0,low:8,cost:18,unit:'per game',variant:'Date Night/Naughty/Blackout/Girls Night',emoji:'🎮'},
+    {id:21,name:'BYOP Custom Shaker',cat:'branded',qty:0,low:10,cost:8,unit:'each',variant:'Stainless · BYOP Logo Printed',emoji:'🍸'},
+    {id:22,name:'Custom Shot Glasses — 2pk',cat:'branded',qty:0,low:10,cost:5.50,unit:'per 2pk',variant:'Branded keepsake',emoji:'🥂'},
+    {id:23,name:'Custom Shot Glasses — 4pk',cat:'branded',qty:0,low:5,cost:9,unit:'per 4pk',variant:'XL/Double boxes',emoji:'🥂'},
+    {id:24,name:'Recipe Cards — Set of 3',cat:'branded',qty:0,low:15,cost:2.50,unit:'per set',variant:'Laminated · BYOP branded',emoji:'📋'},
+    {id:25,name:'BYOP Merch Tee — S',cat:'apparel',qty:0,low:5,cost:8,unit:'each',variant:'S · Color-matched',emoji:'👕'},
+    {id:26,name:'BYOP Merch Tee — M',cat:'apparel',qty:0,low:5,cost:8,unit:'each',variant:'M · Color-matched',emoji:'👕'},
+    {id:27,name:'BYOP Merch Tee — L',cat:'apparel',qty:0,low:5,cost:8,unit:'each',variant:'L · Color-matched',emoji:'👕'},
+    {id:28,name:'BYOP Merch Tee — XL',cat:'apparel',qty:0,low:5,cost:8,unit:'each',variant:'XL · Color-matched',emoji:'👕'},
+    {id:29,name:'BYOP Merch Tee — 2XL',cat:'apparel',qty:0,low:3,cost:9,unit:'each',variant:'2XL · Color-matched',emoji:'👕'},
+    {id:30,name:'Plates — 16ct Pack',cat:'party',qty:0,low:10,cost:3.50,unit:'per pack',variant:'Color-matched · 16ct',emoji:'🍽️'},
+    {id:31,name:'Napkins Pack',cat:'party',qty:0,low:10,cost:2,unit:'per pack',variant:'Color-matched',emoji:'🧻'},
+    {id:32,name:'Disposable Shot Glasses — 20ct',cat:'party',qty:0,low:10,cost:3,unit:'per pack',variant:'20ct · Clear',emoji:'🥂'},
+    {id:33,name:'Tablecloth',cat:'party',qty:0,low:8,cost:4,unit:'each',variant:'Color-matched · Disposable',emoji:'🟦'},
+    {id:34,name:'Tissue Paper / Crinkle Fill',cat:'packing',qty:0,low:20,cost:0.75,unit:'per use',variant:'Color-matched',emoji:'🎀'},
+    {id:35,name:'Ribbon / Bow',cat:'packing',qty:0,low:15,cost:1,unit:'each',variant:'Color-matched',emoji:'🎀'},
+    {id:36,name:'BYOP Sticker / Seal',cat:'packing',qty:0,low:20,cost:0.50,unit:'each',variant:'Logo sticker for seal',emoji:'🔖'},
+    {id:37,name:'Bubble Wrap / Protective Insert',cat:'packing',qty:0,low:10,cost:1.50,unit:'per box',variant:'Bottle protection',emoji:'📬'},
+  ],
+  assemblies: [],
+  nextKitId: 13,
+  nextSupId: 38,
+};
+
+// Load from localStorage
+function loadBS(){
+  try{const r=localStorage.getItem(BYOP_KEY);if(r){const p=JSON.parse(r);BS={...BS,...p};}}catch(e){}
+}
+function saveBS(){localStorage.setItem(BYOP_KEY,JSON.stringify(BS));}
+loadBS();
+
+// Helpers
+const bfmt=(n)=>'$'+(+n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+const bfmt2=(n)=>'$'+(+n||0).toFixed(2);
+const bCatLabel={box:'📦 Acrylic Boxes',liquor:'🥃 Liquor',games:'🃏 Games',branded:'🎨 Branded',apparel:'👕 Apparel',party:'🎉 Party Supplies',rtd:'🥤 RTD / Cans',packing:'📬 Packing'};
+const bCatColor={box:'var(--gold)',liquor:'var(--orange)',games:'var(--violet)',branded:'var(--rose)',apparel:'var(--blue)',party:'var(--teal)',rtd:'#FB923C',packing:'var(--t3)'};
+
+function bStockStatus(qty,low){
+  if(qty===0)return{cls:'color:var(--red)',badge:'b-out',lbl:'OUT'};
+  if(qty<=low)return{cls:'color:var(--orange)',badge:'b-low',lbl:'LOW'};
+  return{cls:'color:var(--green)',badge:'b-ok',lbl:'OK'};
+}
+
+// BYOP Sub-tab navigation
+function byopSubTab(el, id){
+  document.querySelectorAll('#view-byop .sub-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  ['byop-kits','byop-supplies','byop-assembly','byop-value'].forEach(s=>{
+    const el2=document.getElementById(s);
+    if(el2) el2.style.display = s===id ? 'block':'none';
+  });
+  if(id==='byop-kits')renderByopKits();
+  if(id==='byop-supplies')renderByopSupplies();
+  if(id==='byop-assembly'){populateByopEditionSelect();renderByopAssembly();}
+  if(id==='byop-value')renderByopValue();
+}
+
+// ── KITS ──
+function renderByopKits(){
+  const filter=document.getElementById('byop-kit-filter')?.value||'all';
+  const kits=filter==='all'?BS.kits:BS.kits.filter(k=>k.type===filter);
+  const grid=document.getElementById('byop-kit-grid');
+  if(!grid)return;
+
+  grid.innerHTML=kits.map(k=>{
+    const st=bStockStatus(k.stock||0,k.low||2);
+    const val=(k.stock||0)*(k.price||0);
+    const margin=(k.price||0)-(k.cost||0);
+    return `<div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;overflow:hidden;transition:border .2s" onmouseenter="this.style.borderColor='rgba(201,168,76,0.3)'" onmouseleave="this.style.borderColor='var(--border2)'">
+      <div style="padding:14px 14px 10px;border-bottom:1px solid var(--border2)">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--t2);margin-bottom:3px">${k.emoji||'🥃'} ${k.type.toUpperCase()}</div>
+        <div style="font-size:15px;font-weight:800;color:var(--t1);line-height:1.2;margin-bottom:2px">${k.name}</div>
+        <div style="font-size:10px;color:var(--t3)">${k.liquor||''}</div>
+      </div>
+      <div style="padding:12px 14px">
+        <div style="font-size:19px;font-weight:900;color:var(--gold);margin-bottom:9px">${bfmt(k.price)}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:11px;color:var(--t2)">In Stock</span>
+          <span style="font-size:20px;font-weight:800;${st.cls}">${k.stock||0}</span>
+        </div>
+        <div style="font-size:10px;color:var(--t2);margin-bottom:10px">Value: <strong style="color:var(--gold)">${bfmt(val)}</strong> · Margin: <strong style="color:var(--green)">${bfmt(margin)}</strong></div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+          <button onclick="bAdjKit(${k.id},-1)" style="width:28px;height:28px;border-radius:7px;background:var(--card2);border:1px solid var(--border);color:var(--t1);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+          <input type="number" value="${k.stock||0}" min="0" style="width:50px;text-align:center;border-radius:7px;font-size:13px;font-weight:700;padding:5px" onchange="bSetKit(${k.id},this.value)">
+          <button onclick="bAdjKit(${k.id},1)" style="width:28px;height:28px;border-radius:7px;background:var(--card2);border:1px solid var(--border);color:var(--t1);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+          <span style="padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;background:${st.lbl==='OK'?'rgba(34,197,94,0.1)':st.lbl==='LOW'?'rgba(249,115,22,0.1)':'rgba(239,68,68,0.1)'};color:${st.lbl==='OK'?'var(--green)':st.lbl==='LOW'?'var(--orange)':'var(--red)'}">${st.lbl}</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button onclick="bEditKit(${k.id})" style="flex:1;padding:5px 10px;border-radius:8px;font-size:11px;font-weight:700;color:var(--t2);background:transparent;border:1px solid var(--border);cursor:pointer">Edit</button>
+          <button onclick="bRemoveKit(${k.id})" style="padding:5px 8px;border-radius:8px;font-size:11px;background:var(--card2);border:1px solid var(--border);color:var(--red);cursor:pointer">🗑</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  renderByopKitKPIs();
+}
+
+function renderByopKitKPIs(){
+  const el=document.getElementById('byop-kits-kpis');
+  if(!el)return;
+  const totalStock=BS.kits.reduce((s,k)=>s+(k.stock||0),0);
+  const totalVal=BS.kits.reduce((s,k)=>s+(k.stock||0)*(k.price||0),0);
+  const low=BS.kits.filter(k=>(k.stock||0)>0&&(k.stock||0)<=(k.low||2)).length;
+  const out=BS.kits.filter(k=>(k.stock||0)===0).length;
+  const avgMargin=BS.kits.length?BS.kits.reduce((s,k)=>s+((k.price||0)-(k.cost||0)),0)/BS.kits.length:0;
+  el.innerHTML=`
+    <div class="kpi" style="--bar-color:var(--gold)"><div class="kpi-l">Editions</div><div class="kpi-v">${BS.kits.length}</div><div class="kpi-s">Box types</div></div>
+    <div class="kpi" style="--bar-color:var(--green)"><div class="kpi-l">Kits in Stock</div><div class="kpi-v">${totalStock}</div><div class="kpi-s">Ready to ship</div></div>
+    <div class="kpi" style="--bar-color:var(--gold)"><div class="kpi-l">Kit Value</div><div class="kpi-v">${bfmt(totalVal)}</div><div class="kpi-s">At sell price</div></div>
+    <div class="kpi" style="--bar-color:var(--orange)"><div class="kpi-l">Low Stock</div><div class="kpi-v" style="color:var(--orange)">${low}</div><div class="kpi-s">Need restock</div></div>
+    <div class="kpi" style="--bar-color:var(--green)"><div class="kpi-l">Avg Margin</div><div class="kpi-v" style="color:var(--green)">${bfmt(avgMargin)}</div><div class="kpi-s">Per box</div></div>
+  `;
+}
+
+function bAdjKit(id,d){const k=BS.kits.find(k=>k.id===id);if(k){k.stock=Math.max(0,(k.stock||0)+d);saveBS();renderByopKits();updateNWDisplay();}}
+function bSetKit(id,v){const k=BS.kits.find(k=>k.id===id);if(k){k.stock=Math.max(0,parseInt(v)||0);saveBS();renderByopKitKPIs();updateNWDisplay();}}
+function bRemoveKit(id){BS.kits=BS.kits.filter(k=>k.id!==id);saveBS();renderByopKits();toast('Edition removed');}
+function bEditKit(id){
+  const k=BS.kits.find(k=>k.id===id);if(!k)return;
+  document.getElementById('bk-name').value=k.name;
+  document.getElementById('bk-type').value=k.type;
+  document.getElementById('bk-price').value=k.price;
+  document.getElementById('bk-cost').value=k.cost;
+  document.getElementById('bk-stock').value=k.stock||0;
+  document.getElementById('bk-low').value=k.low||2;
+  document.getElementById('bk-liquor').value=k.liquor||'';
+  document.getElementById('bk-extras').value=k.extras||'';
+  document.getElementById('bk-color').value=k.color||'';
+  document.getElementById('bk-emoji').value=k.emoji||'🥃';
+  document.getElementById('bk-name').dataset.editId=id;
+  openModal('byop-add-kit-modal');
+}
+function saveByopKit(){
+  const name=document.getElementById('bk-name').value;
+  if(!name){toast('Enter name');return;}
+  const editId=parseInt(document.getElementById('bk-name').dataset.editId)||0;
+  const obj={id:editId||BS.nextKitId++,name,type:document.getElementById('bk-type').value,price:parseFloat(document.getElementById('bk-price').value)||0,cost:parseFloat(document.getElementById('bk-cost').value)||0,stock:parseInt(document.getElementById('bk-stock').value)||0,low:parseInt(document.getElementById('bk-low').value)||2,liquor:document.getElementById('bk-liquor').value,extras:document.getElementById('bk-extras').value,color:document.getElementById('bk-color').value,emoji:document.getElementById('bk-emoji').value||'🥃'};
+  if(editId){BS.kits=BS.kits.map(k=>k.id===editId?obj:k);}else{BS.kits.push(obj);}
+  delete document.getElementById('bk-name').dataset.editId;
+  saveBS();closeModal('byop-add-kit-modal');renderByopKits();updateNWDisplay();toast(editId?'Updated ✓':'Added ✓');
+}
+
+// ── SUPPLIES ──
+function renderByopSupplies(){
+  const filter=document.getElementById('byop-sup-filter')?.value||'all';
+  const tbody=document.getElementById('byop-sup-tbody');
+  if(!tbody)return;
+  const items=filter==='all'?BS.supplies:BS.supplies.filter(s=>s.cat===filter);
+  const cats=[...new Set(items.map(s=>s.cat))];
+  let rows='';
+  cats.forEach(cat=>{
+    rows+=`<tr style="background:var(--card2)"><td colspan="9" style="padding:7px 10px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)">${bCatLabel[cat]||cat}</td></tr>`;
+    items.filter(s=>s.cat===cat).forEach(s=>{
+      const st=bStockStatus(s.qty||0,s.low||0);
+      const tv=(s.qty||0)*(s.cost||0);
+      rows+=`<tr>
+        <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:17px">${s.emoji||'📦'}</span><div><div style="font-size:12px;font-weight:500">${s.name}</div><div style="font-size:10px;color:var(--t2)">${s.variant||''}</div></div></div></td>
+        <td style="font-size:11px;color:${bCatColor[s.cat]||'var(--t2)'};font-weight:600">${(bCatLabel[s.cat]||s.cat).replace(/^[^ ]+ /,'')}</td>
+        <td style="font-size:14px;font-weight:700;${st.cls}">${s.qty||0}<div style="font-size:9px;color:var(--t3)">${s.unit||''}</div></td>
+        <td style="font-size:11px;color:var(--t2)">${s.low||0}</td>
+        <td style="font-size:12px;font-weight:600;color:var(--gold)">${bfmt2(s.cost)}</td>
+        <td style="font-size:12px;font-weight:600;color:var(--gold)">${bfmt(tv)}</td>
+        <td><span style="padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;background:${st.lbl==='OK'?'rgba(34,197,94,0.1)':st.lbl==='LOW'?'rgba(249,115,22,0.1)':'rgba(239,68,68,0.1)'};color:${st.lbl==='OK'?'var(--green)':st.lbl==='LOW'?'var(--orange)':'var(--red)'}">${st.lbl}</span></td>
+        <td><div style="display:flex;align-items:center;gap:4px">
+          <button onclick="bAdjSup(${s.id},-1)" style="width:22px;height:22px;border-radius:5px;background:var(--card2);border:1px solid var(--border);color:var(--t1);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+          <input type="number" value="${s.qty||0}" min="0" style="width:42px;text-align:center;font-size:12px;font-weight:700;padding:3px;border-radius:5px;background:var(--card2);border:1px solid var(--border);color:var(--t1)" onchange="bSetSup(${s.id},this.value)">
+          <button onclick="bAdjSup(${s.id},1)" style="width:22px;height:22px;border-radius:5px;background:var(--card2);border:1px solid var(--border);color:var(--t1);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+        </div></td>
+        <td><div style="display:flex;gap:4px">
+          <button onclick="bEditSup(${s.id})" style="background:var(--card2);border:1px solid var(--border);color:var(--t2);border-radius:7px;padding:4px 7px;cursor:pointer;font-size:11px">✏️</button>
+          <button onclick="bRemSup(${s.id})" style="background:var(--card2);border:1px solid var(--border);color:var(--red);border-radius:7px;padding:4px 7px;cursor:pointer;font-size:11px">🗑</button>
+        </div></td>
+      </tr>`;
+    });
+  });
+  tbody.innerHTML=rows||'<tr><td colspan="9" style="text-align:center;color:var(--t3);padding:18px">No items</td></tr>';
+  renderByopSupKPIs();
+}
+
+function renderByopSupKPIs(){
+  const el=document.getElementById('byop-sup-kpis');
+  if(!el)return;
+  const totalVal=BS.supplies.reduce((s,i)=>s+(i.qty||0)*(i.cost||0),0);
+  const low=BS.supplies.filter(s=>(s.qty||0)>0&&(s.qty||0)<=(s.low||0)).length;
+  const out=BS.supplies.filter(s=>(s.qty||0)===0).length;
+  const totalUnits=BS.supplies.reduce((s,i)=>s+(i.qty||0),0);
+  el.innerHTML=`
+    <div class="kpi" style="--bar-color:var(--gold)"><div class="kpi-l">SKUs</div><div class="kpi-v">${BS.supplies.length}</div><div class="kpi-s">Unique items</div></div>
+    <div class="kpi" style="--bar-color:var(--teal)"><div class="kpi-l">Total Units</div><div class="kpi-v">${totalUnits}</div><div class="kpi-s">All supplies</div></div>
+    <div class="kpi" style="--bar-color:var(--gold)"><div class="kpi-l">Supply Value</div><div class="kpi-v">${bfmt(totalVal)}</div><div class="kpi-s">At cost</div></div>
+    <div class="kpi" style="--bar-color:var(--orange)"><div class="kpi-l">Low Stock</div><div class="kpi-v" style="color:var(--orange)">${low}</div><div class="kpi-s">Need reorder</div></div>
+    <div class="kpi" style="--bar-color:var(--red)"><div class="kpi-l">Out of Stock</div><div class="kpi-v" style="color:var(--red)">${out}</div><div class="kpi-s">Zero units</div></div>
+  `;
+}
+
+function bAdjSup(id,d){const s=BS.supplies.find(s=>s.id===id);if(s){s.qty=Math.max(0,(s.qty||0)+d);saveBS();renderByopSupplies();updateNWDisplay();}}
+function bSetSup(id,v){const s=BS.supplies.find(s=>s.id===id);if(s){s.qty=Math.max(0,parseInt(v)||0);saveBS();renderByopSupKPIs();updateNWDisplay();}}
+function bRemSup(id){BS.supplies=BS.supplies.filter(s=>s.id!==id);saveBS();renderByopSupplies();toast('Removed');}
+function bEditSup(id){
+  const s=BS.supplies.find(s=>s.id===id);if(!s)return;
+  document.getElementById('bs-name').value=s.name;
+  document.getElementById('bs-cat').value=s.cat;
+  document.getElementById('bs-qty').value=s.qty||0;
+  document.getElementById('bs-low').value=s.low||5;
+  document.getElementById('bs-cost').value=s.cost||0;
+  document.getElementById('bs-variant').value=s.variant||'';
+  document.getElementById('bs-emoji').value=s.emoji||'📦';
+  document.getElementById('bs-name').dataset.editId=id;
+  openModal('byop-add-supply-modal');
+}
+function saveByopSupply(){
+  const name=document.getElementById('bs-name').value;
+  if(!name){toast('Enter name');return;}
+  const editId=parseInt(document.getElementById('bs-name').dataset.editId)||0;
+  const obj={id:editId||BS.nextSupId++,name,cat:document.getElementById('bs-cat').value,qty:parseInt(document.getElementById('bs-qty').value)||0,low:parseInt(document.getElementById('bs-low').value)||5,cost:parseFloat(document.getElementById('bs-cost').value)||0,variant:document.getElementById('bs-variant').value,emoji:document.getElementById('bs-emoji').value||'📦'};
+  if(editId){BS.supplies=BS.supplies.map(s=>s.id===editId?obj:s);}else{BS.supplies.push(obj);}
+  delete document.getElementById('bs-name').dataset.editId;
+  saveBS();closeModal('byop-add-supply-modal');renderByopSupplies();updateNWDisplay();toast(editId?'Updated ✓':'Added ✓');
+}
+
+// ── ASSEMBLY ──
+const BYOP_CHECKLIST=['Acrylic box (clean)','Liquor bottle (sealed, correct)','UNO Game deck','Do or Drink game','BYOP Custom Shaker','Recipe Cards (3 laminated)','Shot Glasses (2pk or 4pk)','Merch Tee (correct size)','Plates 16ct (color-matched)','Napkins (color-matched)','Disposable Shot Glasses 20ct','Tablecloth (color-matched)','Tissue paper / crinkle fill','Ribbon / bow (color-matched)','BYOP sticker / seal','Box sealed & presentation-ready'];
+
+function populateByopEditionSelect(){
+  const sel=document.getElementById('ba-edition');
+  if(!sel)return;
+  sel.innerHTML=BS.kits.map(k=>`<option value="${k.id}">${k.emoji} ${k.name}</option>`).join('');
+}
+function createByopAssembly(){
+  const name=document.getElementById('ba-name').value;
+  const edId=parseInt(document.getElementById('ba-edition').value);
+  const notes=document.getElementById('ba-notes').value;
+  if(!name){toast('Enter order name');return;}
+  const kit=BS.kits.find(k=>k.id===edId);
+  const extras=kit?.extras?kit.extras.split(',').map(e=>e.trim()).filter(Boolean):[];
+  const checklist=[...BYOP_CHECKLIST,...extras.map(e=>e+' ✦')].map(item=>({item,done:false}));
+  BS.assemblies.unshift({id:Date.now(),name,edId,notes,checklist,created:new Date().toISOString()});
+  saveBS();closeModal('byop-assembly-modal');renderByopAssembly();
+  document.getElementById('ba-name').value='';document.getElementById('ba-notes').value='';
+  toast('Build started ✓');
+}
+function renderByopAssembly(){
+  const el=document.getElementById('byop-assembly-list');
+  if(!el)return;
+  if(!BS.assemblies.length){el.innerHTML='<div style="text-align:center;color:var(--t3);padding:24px;font-size:12px">No builds in progress</div>';return;}
+  el.innerHTML=BS.assemblies.map((a,ai)=>{
+    const kit=BS.kits.find(k=>k.id===a.edId);
+    const done=a.checklist.filter(c=>c.done).length;
+    const total=a.checklist.length;
+    const pct=total?Math.round(done/total*100):0;
+    const allDone=done===total;
+    return `<div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;padding:16px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+        <div>
+          <div style="font-size:15px;font-weight:700">${a.name}</div>
+          <div style="font-size:11px;color:var(--t2);margin-top:2px">${kit?kit.emoji+' '+kit.name:''} · ${new Date(a.created).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+          ${a.notes?`<div style="font-size:11px;color:var(--gold);margin-top:2px">📝 ${a.notes}</div>`:''}
+        </div>
+        <div style="text-align:right">
+          <span style="padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;background:${allDone?'rgba(34,197,94,0.1)':'rgba(249,115,22,0.1)'};color:${allDone?'var(--green)':'var(--orange)'}">${allDone?'✓ PACKED':'IN PROGRESS'}</span>
+          <div style="font-size:12px;color:var(--t2);margin-top:4px">${done}/${total}</div>
+          <div style="height:4px;width:80px;background:var(--card2);border-radius:2px;margin-top:6px;overflow:hidden;margin-left:auto">
+            <div style="height:100%;width:${pct}%;background:${allDone?'var(--green)':'var(--gold)'};border-radius:2px;transition:width .4s"></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:12px">
+        ${a.checklist.map((c,ci)=>`<label style="display:flex;align-items:center;gap:7px;font-size:12px;color:${c.done?'var(--t3)':'var(--t2)'};cursor:pointer;${c.done?'text-decoration:line-through':''}"><input type="checkbox" ${c.done?'checked':''} style="accent-color:var(--gold);cursor:pointer" onchange="bToggleAssem(${ai},${ci},this.checked)"> ${c.item}</label>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px">
+        ${allDone?`<button class="btn-sm btn-gold" onclick="bCompleteAssem(${ai})">✓ Mark Shipped</button>`:''}
+        <button class="btn-sm btn-ghost" onclick="bRemAssem(${ai})">Remove</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function bToggleAssem(ai,ci,v){BS.assemblies[ai].checklist[ci].done=v;saveBS();renderByopAssembly();}
+function bCompleteAssem(ai){
+  const a=BS.assemblies[ai];
+  const kit=BS.kits.find(k=>k.id===a.edId);
+  if(kit&&(kit.stock||0)>0)kit.stock--;
+  // Log as income transaction
+  S.transactions.unshift({desc:'BYOP Sale: '+a.name,amt:kit?.price||0,type:'income',biz:'byop',date:new Date().toISOString().slice(0,10),icon:'📦'});
+  saveState();
+  BS.assemblies.splice(ai,1);saveBS();renderByopAssembly();renderByopKits();updateNWDisplay();
+  toast('Shipped! Revenue logged ✓');
+}
+function bRemAssem(ai){BS.assemblies.splice(ai,1);saveBS();renderByopAssembly();}
+
+// ── VALUE VIEW ──
+function renderByopValue(){
+  const kitEl=document.getElementById('byop-kit-val-breakdown');
+  const supEl=document.getElementById('byop-sup-val-breakdown');
+  const totEl=document.getElementById('byop-total-val');
+  const kitVal=BS.kits.reduce((s,k)=>s+(k.stock||0)*(k.price||0),0);
+  const kitCost=BS.kits.reduce((s,k)=>s+(k.stock||0)*(k.cost||0),0);
+  const supVal=BS.supplies.reduce((s,i)=>s+(i.qty||0)*(i.cost||0),0);
+
+  if(kitEl){
+    const withStock=BS.kits.filter(k=>(k.stock||0)>0);
+    kitEl.innerHTML=(withStock.length?withStock.map(k=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border2);font-size:12px"><span style="color:var(--t2)">${k.emoji} ${k.name} ×${k.stock}</span><span style="font-weight:700;color:var(--gold)">${bfmt((k.stock||0)*(k.price||0))}</span></div>`).join(''):'<div style="color:var(--t3);font-size:12px;padding:8px 0">No complete kits in stock yet</div>')+
+    `<div style="display:flex;justify-content:space-between;padding:10px 0 0;font-size:13px;font-weight:700;border-top:1px solid var(--border)"><span>Kit Total</span><span style="color:var(--gold);font-size:17px">${bfmt(kitVal)}</span></div>`;
+  }
+  if(supEl){
+    const cats=[...new Set(BS.supplies.map(s=>s.cat))];
+    const rows=cats.map(cat=>{const v=BS.supplies.filter(s=>s.cat===cat).reduce((s,i)=>s+(i.qty||0)*(i.cost||0),0);return{cat,v};}).filter(c=>c.v>0).sort((a,b)=>b.v-a.v);
+    supEl.innerHTML=(rows.length?rows.map(c=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border2);font-size:12px"><span style="color:var(--t2)">${bCatLabel[c.cat]||c.cat}</span><span style="font-weight:700">${bfmt(c.v)}</span></div>`).join(''):'<div style="color:var(--t3);font-size:12px;padding:8px 0">Update quantities in Supply Inventory tab</div>')+
+    `<div style="display:flex;justify-content:space-between;padding:10px 0 0;font-size:13px;font-weight:700;border-top:1px solid var(--border)"><span>Supply Total</span><span style="color:var(--gold);font-size:17px">${bfmt(supVal)}</span></div>`;
+  }
+  if(totEl){
+    totEl.innerHTML=`
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border2);font-size:12px"><span style="color:var(--t2)">Complete Kits (at sell price)</span><span style="font-weight:700;color:var(--gold)">${bfmt(kitVal)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border2);font-size:12px"><span style="color:var(--t2)">Complete Kits (at cost)</span><span style="font-weight:700">${bfmt(kitCost)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border2);font-size:12px"><span style="color:var(--t2)">Supply & Component Stock</span><span style="font-weight:700">${bfmt(supVal)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border2);font-size:12px"><span style="color:var(--t2)">Unrealized Margin</span><span style="font-weight:700;color:var(--green)">${bfmt(kitVal-kitCost)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:12px 0 0;font-size:14px;font-weight:700;border-top:1px solid var(--border)"><span>Total BYOP Net Worth (conservative)</span><span style="color:var(--gold);font-size:20px">${bfmt(kitCost+supVal)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0 0;font-size:12px;font-weight:700"><span style="color:var(--t2)">At sell price (if all kits sold)</span><span style="color:var(--gold);font-size:16px">${bfmt(kitVal+supVal)}</span></div>
+      <div style="font-size:10px;color:var(--t3);margin-top:8px">Conservative = kits at build cost + all supply stock at cost. This is what counts toward your AMPM net worth.</div>
+    `;
+  }
+}
+
+// Include BYOP value in overall net worth
+const _origInvValue2 = invValue;
+invValue = function(){
+  let v = _origInvValue2();
+  // Add BYOP: kit cost basis + supply stock at cost
+  v += BS.kits.reduce((s,k)=>s+(k.stock||0)*(k.cost||0),0);
+  v += BS.supplies.reduce((s,i)=>s+(i.qty||0)*(i.cost||0),0);
+  return v;
+};
+
+
+// ── BYOP INLINE SYNC (no modal) ──
+function toggleByopSyncPanel(){
+  var p = document.getElementById('byop-sync-panel');
+  if(p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function doByopImport(){
+  var btn = document.getElementById('byop-sync-btn');
+  var msg = document.getElementById('byop-sync-msg');
+  var raw = (document.getElementById('byop-paste-area').value || '').trim();
+
+  function showMsg(ok, text){
+    if(msg){
+      msg.style.display = 'block';
+      msg.style.background = ok ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.1)';
+      msg.style.color = ok ? 'var(--green)' : 'var(--red)';
+      msg.style.border = ok ? '1px solid rgba(34,197,94,0.2)' : '1px solid rgba(239,68,68,0.2)';
+      msg.textContent = text;
+    }
+    if(btn){ btn.textContent = '↻ Sync Now'; btn.disabled = false; }
+  }
+
+  if(!raw){ showMsg(false, '✗ Nothing pasted yet — copy from the BYOP app first'); return; }
+  if(btn){ btn.textContent = 'Syncing...'; btn.disabled = false; }
+
+  var parsed;
+  try{ parsed = JSON.parse(raw); }
+  catch(e){
+    try{ parsed = JSON.parse(raw + '}}'); }
+    catch(e2){ showMsg(false, '✗ Invalid data. Use the Copy to Clipboard button in the BYOP app.'); return; }
+  }
+
+  if(!parsed || (!parsed.kits && !parsed.supplies)){
+    showMsg(false, '✗ Wrong format — export must come from byopinventory.netlify.app');
+    return;
+  }
+
+  if(parsed.kits) BS.kits = parsed.kits;
+  if(parsed.supplies) BS.supplies = parsed.supplies;
+  if(parsed.assemblies) BS.assemblies = parsed.assemblies;
+  if(parsed.nextKitId) BS.nextKitId = parsed.nextKitId;
+  if(parsed.nextSupplyId) BS.nextSupplyId = parsed.nextSupplyId;
+
+  try{ localStorage.setItem('byop_dash_v1', JSON.stringify(BS)); }catch(e){}
+  try{ renderByopKits(); }catch(e){}
+  try{ renderByopKitKPIs(); }catch(e){}
+  try{ renderByopSupplies(); }catch(e){}
+  try{ renderByopSupKPIs(); }catch(e){}
+  try{ updateNWDisplay(); }catch(e){}
+
+  var kc = (parsed.kits||[]).length;
+  var sc = (parsed.supplies||[]).length;
+  showMsg(true, '✓ Done! ' + kc + ' kit editions + ' + sc + ' supplies synced.');
+  document.getElementById('byop-paste-area').value = '';
+  setTimeout(function(){ 
+    var p = document.getElementById('byop-sync-panel');
+    if(p) p.style.display = 'none';
+    if(msg) msg.style.display = 'none';
+  }, 3000);
+}
+
+function doByopExport(){
+  var area = document.getElementById('byop-copy-area');
+  var cmsg = document.getElementById('byop-copy-msg');
+  var data = JSON.stringify(BS, null, 2);
+  if(area) area.value = data;
+  try{
+    navigator.clipboard.writeText(data).then(function(){
+      if(cmsg){ cmsg.style.display = 'block'; setTimeout(function(){ cmsg.style.display='none'; }, 2500); }
+    }).catch(function(){
+      if(area){ area.select(); document.execCommand('copy'); }
+      if(cmsg){ cmsg.style.display = 'block'; setTimeout(function(){ cmsg.style.display='none'; }, 2500); }
+    });
+  }catch(e){
+    if(area){ area.select(); document.execCommand('copy'); }
+  }
+}
+
+
+// ══════════════════════════════════════════════════
+function importByopData(){
+  const btn = document.querySelector('#byop-import-modal .btn-gold');
+  const resultEl = document.getElementById('byop-import-result');
+  const raw = (document.getElementById('byop-import-json').value || '').trim();
+
+  // Show working state
+  if(btn){ btn.textContent = '↻ Syncing...'; btn.disabled = true; }
+
+  function showResult(ok, msg){
+    if(resultEl){
+      resultEl.style.display = 'block';
+      resultEl.style.color = ok ? 'var(--green)' : 'var(--red)';
+      resultEl.textContent = msg;
+    }
+    if(btn){ btn.textContent = '↻ Sync Now'; btn.disabled = false; }
+  }
+
+  // Empty check
+  if(!raw){
+    showResult(false, '✗ Nothing pasted — copy from BYOP app first');
+    return;
+  }
+
+  // Try to parse JSON
+  let parsed;
+  try{
+    parsed = JSON.parse(raw);
+  }catch(e){
+    // Maybe only part was copied — try to fix truncated JSON
+    try{
+      // Add closing brackets if missing
+      let fixed = raw;
+      if(!raw.endsWith('}')) fixed = raw + '}}';
+      parsed = JSON.parse(fixed);
+    }catch(e2){
+      showResult(false, '✗ Invalid JSON — make sure you clicked "Copy to Clipboard" in the BYOP app, not just selected text. Error: ' + e.message.slice(0,60));
+      return;
+    }
+  }
+
+  // Validate structure
+  if(!parsed || (!parsed.kits && !parsed.supplies)){
+    showResult(false, '✗ Wrong data format — this JSON does not look like BYOP inventory data. Make sure you exported from byopinventory.netlify.app');
+    return;
+  }
+
+  // Apply data
+  if(parsed.kits && Array.isArray(parsed.kits)) BS.kits = parsed.kits;
+  if(parsed.supplies && Array.isArray(parsed.supplies)) BS.supplies = parsed.supplies;
+  if(parsed.assemblies && Array.isArray(parsed.assemblies)) BS.assemblies = parsed.assemblies;
+  if(parsed.nextKitId) BS.nextKitId = parsed.nextKitId;
+  if(parsed.nextSupplyId) BS.nextSupplyId = parsed.nextSupplyId;
+
+  // Save
+  try{ saveBS(); }catch(e){ console.warn('saveBS error:', e); }
+
+  // Refresh UI — wrapped in try so render errors don't block the success message
+  try{ renderByopKits(); }catch(e){ console.warn('renderByopKits:', e); }
+  try{ renderByopKitKPIs(); }catch(e){ console.warn('kpis:', e); }
+  try{ renderByopSupplies(); }catch(e){ console.warn('sups:', e); }
+  try{ renderByopSupKPIs(); }catch(e){ console.warn('supkpis:', e); }
+  try{ renderByopValue(); }catch(e){ console.warn('val:', e); }
+  try{ updateNWDisplay(); }catch(e){ console.warn('nw:', e); }
+
+  const kitCount = (parsed.kits || []).length;
+  const supCount = (parsed.supplies || []).length;
+  showResult(true, '✓ Synced! ' + kitCount + ' kit editions + ' + supCount + ' supply items imported into dashboard.');
+  
+  // Store sync time
+  localStorage.setItem('byop_last_sync', new Date().toISOString());
+  
+  // Auto-close after 3 seconds
+  setTimeout(()=>{
+    closeModal('byop-import-modal');
+    if(resultEl) resultEl.style.display = 'none';
+    document.getElementById('byop-import-json').value = '';
+  }, 3000);
+
+  toast('BYOP synced — ' + kitCount + ' kits, ' + supCount + ' supplies ✓');
+}
+
+
+function copyByopExport(){
+  const ta = document.getElementById('byop-export-json');
+  ta.select();
+  navigator.clipboard.writeText(ta.value)
+    .then(()=>{ document.getElementById('byop-copy-confirm').style.display='block'; })
+    .catch(()=>{ document.execCommand('copy'); document.getElementById('byop-copy-confirm').style.display='block'; });
+}
+
+// ── Last sync timestamp ──
+function updateByopSyncTime(){
+  const key = 'byop_last_sync';
+  const existing = localStorage.getItem(key);
+  if(existing){
+    const banner = document.querySelector('#view-byop .byop-sync-time');
+    if(banner) banner.textContent = 'Last synced: ' + new Date(existing).toLocaleString();
+  }
+}
+
+
+function promptCashUpdate(){
+  const val=prompt('Update cash on hand ($):', S.cash||6000);
+  if(val===null)return;
+  const n=parseFloat(val.replace(/[^0-9.]/g,''))||0;
+  S.cash=n;saveState();
+  const el=document.getElementById('cash-display');
+  if(el) el.textContent=fmt(n);
+  updateNWDisplay();
+  toast('Cash updated to '+fmt(n));
+}
+function renderAssetList(){
+  // wrapper called from init
+  updateNWDisplay();
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   BYOP SYNC — event listeners attached after DOM ready
+   No onclick attributes. Cannot be blocked by overlays.
+═══════════════════════════════════════════════════════ */
+(function(){
+  function attachByopSync(){
+    var toggleBtn1 = document.querySelector('[onclick="toggleByopSyncPanel()"]');
+    var panel = document.getElementById('byop-sync-panel');
+    var syncBtn = document.getElementById('byop-sync-btn');
+    var exportBtn = document.getElementById('byop-export-btn');
+    var pasteArea = document.getElementById('byop-paste-area');
+    var exportArea = document.getElementById('byop-export-area');
+    var statusEl = document.getElementById('byop-sync-status');
+
+    // Toggle panel open/close
+    function togglePanel(){
+      if(!panel) return;
+      panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none';
+    }
+
+    // Attach to all buttons that should toggle the panel
+    document.querySelectorAll('[onclick="toggleByopSyncPanel()"]').forEach(function(btn){
+      btn.removeAttribute('onclick');
+      btn.addEventListener('click', togglePanel);
+    });
+
+    // SYNC button
+    if(syncBtn){
+      syncBtn.addEventListener('click', function(){
+        var raw = pasteArea ? pasteArea.value.trim() : '';
+
+        function showStatus(ok, msg){
+          if(statusEl){
+            statusEl.style.display = 'block';
+            statusEl.style.background = ok ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.12)';
+            statusEl.style.color = ok ? '#22C55E' : '#EF4444';
+            statusEl.style.border = '1px solid ' + (ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.25)');
+            statusEl.textContent = msg;
+          }
+          syncBtn.textContent = '↻ SYNC NOW';
+          syncBtn.disabled = false;
+        }
+
+        if(!raw){
+          showStatus(false, '✗ Paste your exported data first');
+          return;
+        }
+
+        syncBtn.textContent = 'Syncing...';
+        syncBtn.disabled = true;
+
+        var parsed;
+        try { parsed = JSON.parse(raw); }
+        catch(e) {
+          showStatus(false, '✗ Invalid JSON — use the Copy button in the BYOP app, not manual selection');
+          return;
+        }
+
+        if(!parsed || typeof parsed !== 'object'){
+          showStatus(false, '✗ Data format not recognized');
+          return;
+        }
+
+        // Apply — check for both possible key names
+        var kits = parsed.kits || [];
+        var supplies = parsed.supplies || [];
+
+        if(!kits.length && !supplies.length){
+          showStatus(false, '✗ No kits or supplies found in pasted data');
+          return;
+        }
+
+        try{
+          if(typeof BS !== 'undefined'){
+            if(kits.length) BS.kits = kits;
+            if(supplies.length) BS.supplies = supplies;
+            if(parsed.assemblies) BS.assemblies = parsed.assemblies;
+            localStorage.setItem('byop_dash_v1', JSON.stringify(BS));
+          }
+        } catch(e){}
+
+        // Refresh UI
+        try{ renderByopKits(); }catch(e){}
+        try{ renderByopKitKPIs(); }catch(e){}
+        try{ renderByopSupplies(); }catch(e){}
+        try{ updateNWDisplay(); }catch(e){}
+
+        if(pasteArea) pasteArea.value = '';
+        showStatus(true, '✓ Synced! ' + kits.length + ' kit editions + ' + supplies.length + ' supplies updated.');
+        setTimeout(function(){
+          togglePanel();
+          if(statusEl) statusEl.style.display = 'none';
+        }, 3000);
+      });
+    }
+
+    // EXPORT button
+    if(exportBtn){
+      exportBtn.addEventListener('click', function(){
+        var data = '';
+        try{ data = JSON.stringify(typeof BS !== 'undefined' ? BS : {}, null, 2); }catch(e){ data = '{}'; }
+        if(exportArea){
+          exportArea.style.display = 'block';
+          exportArea.value = data;
+          exportArea.select();
+        }
+        try{
+          navigator.clipboard.writeText(data).then(function(){
+            exportBtn.textContent = '✓ Copied!';
+            setTimeout(function(){ exportBtn.textContent = '📤 Export'; }, 2000);
+          }).catch(function(){
+            try{ document.execCommand('copy'); }catch(e){}
+            exportBtn.textContent = '✓ Copied!';
+            setTimeout(function(){ exportBtn.textContent = '📤 Export'; }, 2000);
+          });
+        }catch(e){
+          try{ document.execCommand('copy'); }catch(e2){}
+        }
+      });
+    }
+  }
+
+  // Attach immediately + after DOM ready (belt and suspenders)
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', attachByopSync);
+  } else {
+    attachByopSync();
+  }
+  // Also attach after a delay in case something loads late
+  setTimeout(attachByopSync, 500);
+  setTimeout(attachByopSync, 1500);
+})();
+
+</script>
+<style>
+:root{
+  --bg:#0A0A0B;--surface:#111113;--card:#18181A;--card2:#1E1E21;--border:rgba(255,255,255,0.06);
+  --gold:#C9A84C;--gold2:#E8C96C;--gold-bg:rgba(201,168,76,0.08);--gold-bg2:rgba(201,168,76,0.15);
+  --blue:#3B82F6;--blue-l:rgba(59,130,246,0.15);
+  --green:#22C55E;--green-l:rgba(34,197,94,0.12);
+  --red:#EF4444;--red-l:rgba(239,68,68,0.1);
+  --orange:#F97316;--orange-l:rgba(249,115,22,0.1);
+  --teal:#14B8A6;--rose:#F472B6;--violet:#8B5CF6;
+  --t1:#FFFFFF;--t2:rgba(255,255,255,0.55);--t3:rgba(255,255,255,0.25);
+  --r:12px;--r2:16px;--r3:20px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--t1);font-family:'Inter',sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
+input,select,textarea{font-family:'Inter',sans-serif;font-size:13px;color:var(--t1);background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;outline:none;transition:border .2s}
+input:focus,select:focus,textarea:focus{border-color:rgba(201,168,76,0.5)}
+input::placeholder{color:var(--t3)}
+button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:none}
+::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:3px}
+
+/* LAYOUT */
+.shell{display:block;min-height:100vh}
+.sidebar{
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  position:fixed;top:0;left:0;bottom:0;width:220px;
+  display:flex;flex-direction:column;
+  z-index:150;overflow-y:auto;
+  transition:transform .28s cubic-bezier(.16,1,.3,1);
+}
+.main{margin-left:220px;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
+
+/* SIDEBAR */
+.sb-brand{padding:18px 16px 12px;border-bottom:1px solid var(--border)}
+.sb-logo{font-size:20px;font-weight:900;color:var(--gold);letter-spacing:-.04em}
+.sb-tagline{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin-top:2px}
+.sb-section{padding:8px 0}
+.sb-label{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);padding:4px 16px 2px;font-weight:600}
+.sb-item{display:flex;align-items:center;gap:9px;padding:8px 16px;color:var(--t2);font-size:12px;font-weight:500;cursor:pointer;border-left:2px solid transparent;transition:all .15s}
+.sb-item:hover{color:var(--t1);background:rgba(255,255,255,0.03)}
+.sb-item.active{color:var(--gold);background:var(--gold-bg);border-left-color:var(--gold)}
+.sb-item .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.sb-footer{margin-top:auto;padding:12px 16px;border-top:1px solid var(--border)}
+.sb-sync{font-size:10px;color:var(--t3);display:flex;align-items:center;gap:6px}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green)}
+
+/* TOPBAR */
+.topbar{padding:12px 20px;border-bottom:1px solid var(--border);background:rgba(10,10,11,0.97);backdrop-filter:blur(20px);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-shrink:0}
+.tb-greeting{font-size:18px;font-weight:700;letter-spacing:-.02em}
+.tb-right{display:flex;align-items:center;gap:10px}
+.avatar{width:34px;height:34px;border-radius:50%;background:var(--gold-bg2);border:1.5px solid var(--gold);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:var(--gold)}
+.btn-sm{padding:6px 13px;border-radius:8px;font-size:11px;font-weight:700;letter-spacing:.02em}
+.btn-gold{background:var(--gold);color:#0A0800}
+.btn-gold:hover{background:var(--gold2)}
+.btn-ghost{background:transparent;color:var(--t2);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:rgba(201,168,76,0.4);color:var(--t1)}
+
+/* BIZ TABS */
+.biz-tabs{display:flex;gap:0;padding:0 20px;overflow-x:auto}
+.biz-tab{padding:11px 18px;font-size:12px;font-weight:600;color:var(--t2);border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;background:none;border-top:none;border-left:none;border-right:none;transition:all .15s}
+.biz-tab:hover{color:var(--t1)}
+.biz-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+.biz-tab .tab-dot{width:5px;height:5px;border-radius:50%;display:inline-block;margin-right:5px;margin-bottom:1px;vertical-align:middle}
+
+/* CONTENT */
+.content{padding:20px 24px;flex:1}
+.view{display:none}
+.view.active{display:block}
+
+/* NET WORTH HERO */
+.nw-hero{background:var(--card);border:1px solid var(--border);border-radius:var(--r3);padding:22px 24px 16px;margin-bottom:16px;position:relative;overflow:hidden}
+.nw-hero::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,0.4),transparent)}
+.nw-label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--t2);margin-bottom:6px}
+.nw-amount{font-size:42px;font-weight:800;letter-spacing:-.04em;line-height:1}
+.nw-amount.pos{color:var(--green)}
+.nw-amount.neg{color:var(--red)}
+.nw-amount.neutral{color:var(--t1)}
+.nw-change{font-size:13px;margin-top:6px;font-weight:500}
+.nw-change.up{color:var(--green)}
+.nw-change.down{color:var(--red)}
+.time-btns{display:flex;gap:4px;margin:12px 0 4px}
+.tb{padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;color:var(--t2);background:none;border:none;cursor:pointer;transition:all .15s}
+.tb.active{background:var(--card2);color:var(--t1)}
+.chart-area{height:160px;position:relative;margin-top:4px}
+
+/* GRID */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.gcol{display:flex;flex-direction:column;gap:14px}
+.gap14{gap:14px}
+
+/* CARDS */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:18px}
+.card-sm{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:13px}
+.c-title{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--t2);margin-bottom:12px}
+.c-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+
+/* KPI TILES */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px 12px;position:relative;overflow:hidden}
+.kpi::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--bar-color,var(--gold))}
+.kpi-l{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--t2);margin-bottom:5px}
+.kpi-v{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1;color:var(--t1)}
+.kpi-s{font-size:10px;color:var(--t3);margin-top:3px}
+
+/* ASSET / LIABILITY BARS */
+.asset-bar{margin:8px 0}
+.ab-label{display:flex;justify-content:space-between;font-size:11px;color:var(--t2);margin-bottom:4px}
+.ab-track{height:5px;background:var(--card2);border-radius:3px;overflow:hidden}
+.ab-fill{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.16,1,.3,1)}
+
+/* CALENDAR */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:8px}
+.cal-day-label{font-size:9px;font-weight:600;color:var(--t3);text-align:center;padding:2px 0}
+.cal-day{aspect-ratio:1;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:var(--t2);cursor:pointer;transition:all .15s;position:relative;background:var(--card2)}
+.cal-day.has-income{background:rgba(34,197,94,0.15);color:var(--green)}
+.cal-day.has-expense{background:rgba(239,68,68,0.1);color:var(--red)}
+.cal-day.has-both{background:rgba(201,168,76,0.12);color:var(--gold)}
+.cal-day.today{border:1.5px solid var(--gold);color:var(--gold)}
+.cal-day.empty{background:transparent}
+.cal-day:hover:not(.empty){transform:scale(1.1)}
+
+/* TRANSACTIONS */
+.tx-item{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;transition:opacity .12s}
+.tx-item:last-child{border-bottom:none}
+.tx-item:hover{opacity:.8}
+.tx-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:var(--card2)}
+.tx-desc{font-size:13px;font-weight:500;color:var(--t1)}
+.tx-date{font-size:10px;color:var(--t2);margin-top:2px}
+.tx-amt{font-size:13px;font-weight:700;margin-left:auto;flex-shrink:0}
+.tx-amt.in{color:var(--green)}
+.tx-amt.out{color:var(--t1)}
+
+/* HOLDINGS */
+.holding-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.holding-row:last-child{border-bottom:none}
+.hold-icon{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;background:var(--card2);flex-shrink:0}
+.hold-name{font-size:13px;font-weight:600;color:var(--t1)}
+.hold-sub{font-size:10px;color:var(--t2);margin-top:1px}
+.hold-right{margin-left:auto;text-align:right}
+.hold-val{font-size:13px;font-weight:700;color:var(--t1)}
+.hold-chg{font-size:10px;margin-top:1px}
+.hold-chg.up{color:var(--green)}
+.hold-chg.down{color:var(--red)}
+
+/* BILL ITEMS */
+.bill-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.bill-item:last-child{border-bottom:none}
+.bill-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.bill-name{font-size:12px;font-weight:500;color:var(--t1);flex:1}
+.bill-due{font-size:10px;color:var(--t2)}
+.bill-amt{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.bill-status{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:9px;flex-shrink:0;transition:all .15s}
+.bill-status.paid{background:var(--green-l);border-color:var(--green);color:var(--green)}
+.bill-status.due{background:var(--orange-l);border-color:var(--orange)}
+.bill-status.late{background:var(--red-l);border-color:var(--red)}
+
+/* NET30 */
+.net30-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer}
+.net30-row:last-child{border-bottom:none}
+.n30-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;background:rgba(201,168,76,0.08);flex-shrink:0}
+.n30-name{font-size:12px;font-weight:600;color:var(--t1)}
+.n30-sub{font-size:10px;color:var(--t2);margin-top:1px}
+.badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.b-paid{background:var(--green-l);color:var(--green)}
+.b-due{background:var(--orange-l);color:var(--orange)}
+.b-late{background:var(--red-l);color:var(--red)}
+
+/* WISHLIST */
+.wish-item{background:var(--card2);border:1px solid var(--border);border-radius:var(--r);padding:11px;display:flex;align-items:center;gap:11px;margin-bottom:8px;transition:border .2s}
+.wish-item:hover{border-color:rgba(201,168,76,0.25)}
+.wish-img{width:48px;height:48px;border-radius:8px;object-fit:cover;background:var(--card);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)}
+.wish-name{font-size:12px;font-weight:600;color:var(--t1);margin-bottom:2px}
+.wish-link{font-size:10px;color:var(--gold);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.wish-price{font-size:13px;font-weight:800;color:var(--gold);white-space:nowrap}
+.wish-check{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:10px;transition:all .15s}
+.wish-check.done{background:var(--green-l);border-color:var(--green);color:var(--green)}
+
+/* INVENTORY CONNECT */
+.inv-connect{background:linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.03));border:1px solid rgba(201,168,76,0.2);border-radius:var(--r2);padding:18px;margin-bottom:14px}
+.inv-connect-title{font-size:13px;font-weight:700;color:var(--gold);margin-bottom:4px}
+.inv-connect-sub{font-size:11px;color:var(--t2);margin-bottom:12px}
+.inv-url-row{display:flex;gap:8px}
+.inv-url-row input{flex:1;font-size:12px}
+
+/* PROGRESS */
+.progress-wrap{margin:6px 0}
+.pl-row{display:flex;justify-content:space-between;font-size:10px;color:var(--t2);margin-bottom:3px}
+.pb{height:4px;background:var(--card2);border-radius:2px;overflow:hidden}
+.pf{height:100%;border-radius:2px;transition:width .6s cubic-bezier(.16,1,.3,1)}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);z-index:200;display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:var(--r3);padding:24px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;animation:slideUp .3s cubic-bezier(.16,1,.3,1)}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.modal-title{font-size:17px;font-weight:700}
+.modal-close{width:28px;height:28px;border-radius:50%;background:var(--card2);border:1px solid var(--border);color:var(--t2);font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.form-group{margin-bottom:12px}
+.form-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t2);display:block;margin-bottom:5px}
+.form-row{display:flex;gap:8px}
+.form-row>*{flex:1}
+
+/* INLINE EDITABLE */
+[contenteditable=true]{outline:none;border-bottom:1px dashed transparent;transition:border .2s;cursor:text}
+[contenteditable=true]:focus{border-bottom-color:rgba(201,168,76,0.5)}
+
+/* SHEET INVENTORY TABLE */
+.inv-table{width:100%;border-collapse:collapse;font-size:11px}
+.inv-table th{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)}
+.inv-table td{padding:8px 8px;border-bottom:1px solid rgba(255,255,255,0.03);color:var(--t1);vertical-align:middle}
+.inv-table tr:last-child td{border-bottom:none}
+.inv-table tr:hover td{background:rgba(255,255,255,0.02)}
+
+/* SUMMARY BREAKDOWN */
+.sumrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.sumrow:last-child{border-bottom:none}
+.sumrow-label{font-size:12px;color:var(--t2)}
+.sumrow-val{font-size:13px;font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums}
+.sumrow-val.green{color:var(--green)}
+.sumrow-val.gold{color:var(--gold)}
+.sumrow-val.red{color:var(--red)}
+.sumrow.total .sumrow-label{color:var(--t1);font-weight:700;font-size:13px}
+.sumrow.total .sumrow-val{font-size:16px;color:var(--gold)}
+
+/* NET WORTH BREAKDOWN SIDEBAR */
+.nw-side-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden}
+.nw-side-section{padding:14px 16px;border-bottom:1px solid var(--border)}
+.nw-side-section:last-child{border-bottom:none}
+.nw-side-label{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2);margin-bottom:8px;font-weight:700}
+.nw-side-total{font-size:18px;font-weight:800;letter-spacing:-.02em}
+.nw-assets .nw-side-total{color:var(--green)}
+.nw-liab .nw-side-total{color:var(--red)}
+
+/* TOAST */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px 16px;font-size:12px;font-weight:500;color:var(--t1);z-index:999;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+
+/* ── RESPONSIVE ── */
+@media(max-width:1024px){
+  .kpi-row{grid-template-columns:1fr 1fr}
+  .g4{grid-template-columns:1fr 1fr}
+}
+
+/* eBay listing cards */
+.ebay-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:12px}
+.ebay-card{background:var(--card2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:border .2s}
+.ebay-card:hover{border-color:rgba(201,168,76,0.35)}
+.ebay-card-img{width:100%;height:110px;object-fit:cover;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:32px}
+.ebay-card-img img{width:100%;height:110px;object-fit:cover}
+.ebay-card-body{padding:8px}
+.ebay-card-title{font-size:11px;font-weight:500;color:var(--t1);line-height:1.35;height:30px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ebay-card-price{font-size:14px;font-weight:800;color:var(--gold);margin-top:5px}
+.ebay-card-qty{font-size:9px;color:var(--t2);margin-top:2px}
+.ebay-card-sold{background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.15);border-radius:4px;padding:2px 6px;font-size:9px;color:var(--green);display:inline-block;margin-top:4px}
+.ebay-status-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(14,90,30,0.08);border:1px solid rgba(34,197,94,0.15);border-radius:var(--r);margin-bottom:12px;font-size:12px;color:var(--green)}
+.ebay-status-bar.err{background:rgba(239,68,68,0.06);border-color:rgba(239,68,68,0.15);color:var(--red)}
+.ebay-status-bar.loading{color:var(--gold);background:var(--gold-bg)}
+.ebay-connect{background:linear-gradient(135deg,rgba(20,184,166,0.08),rgba(20,184,166,0.03));border:1px solid rgba(20,184,166,0.2);border-radius:var(--r2);padding:16px;margin-bottom:14px}
+.ebay-connect-title{font-size:13px;font-weight:700;color:var(--teal);margin-bottom:4px;display:flex;align-items:center;gap:7px}
+/* Print tab sub-tabs */
+.sub-tab-bar{display:flex;gap:4px;margin-bottom:14px}
+.sub-tab{padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;color:var(--t2);background:var(--card2);border:1px solid var(--border);cursor:pointer;transition:all .15s}
+.sub-tab.active{background:rgba(167,139,250,0.15);color:#A78BFA;border-color:rgba(167,139,250,0.3)}
+
+
+.hamburger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:transparent;flex-shrink:0}
+.hamburger span{display:block;width:17px;height:1.5px;background:var(--t1);border-radius:2px}
+.sidebar-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:149;opacity:0;pointer-events:none;transition:opacity .25s;display:block}
+.sidebar-overlay.open{opacity:1;pointer-events:all}
+
+
+
+
+/* ═══════════════════════════════════════
+   CLEAN RESPONSIVE SYSTEM
+   Desktop: sidebar fixed left 220px
+   Mobile <700px: sidebar slide-over
+═══════════════════════════════════════ */
+
+/* BIZ TABS — always horizontal scroll */
+.biz-tabs{
+  display:flex;flex-wrap:nowrap;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  scroll-behavior:smooth;
+  scrollbar-width:none;
+  border-bottom:1px solid var(--border);
+  padding:0 16px;
+  background:rgba(10,10,11,0.97);
+  position:sticky;top:53px;z-index:98;
+  backdrop-filter:blur(16px);
+}
+.biz-tabs::-webkit-scrollbar{display:none}
+.biz-tab{white-space:nowrap;flex-shrink:0}
+
+/* TOPBAR fix */
+.topbar{position:sticky;top:0;z-index:99;background:rgba(10,10,11,0.97);backdrop-filter:blur(16px)}
+
+/* ── TABLET (max 960px) ── */
+@media(max-width:960px){
+  .g4{grid-template-columns:1fr 1fr}
+  .kpi-row{grid-template-columns:1fr 1fr}
+}
+
+/* ── MOBILE (max 700px) ── */
+@media(max-width:700px){
+  /* sidebar becomes slide-over */
+  .sidebar{
+    transform:translateX(-220px);
+    box-shadow:none;
+  }
+  .sidebar.open{
+    transform:translateX(0);
+    box-shadow:12px 0 48px rgba(0,0,0,0.7);
+  }
+  .main{margin-left:0}
+  .hamburger{display:flex !important}
+
+  /* topbar compact */
+  .topbar{padding:10px 12px;gap:8px}
+  .tb-greeting{font-size:14px;line-height:1.2}
+  #tb-date{display:none}
+  .topbar .btn-sm.btn-ghost{display:none}
+
+  /* biz tabs */
+  .biz-tabs{padding:0 8px;top:50px}
+  .biz-tab{padding:9px 12px;font-size:11px}
+  .tab-dot{width:5px;height:5px}
+
+  /* content */
+  .content{padding:12px 10px}
+
+  /* all grids stack */
+  .g2,.g3,.g4,.kpi-row{grid-template-columns:1fr !important}
+  #overview-main-grid{grid-template-columns:1fr !important}
+
+  /* KPI tiles 2-up */
+  .kpi-row{grid-template-columns:1fr 1fr !important}
+
+  /* net worth hero */
+  .nw-hero{padding:14px 14px 10px}
+  .nw-amount{font-size:30px}
+  .chart-area{height:120px}
+  .time-btns{margin:8px 0 2px}
+  .tb{padding:3px 8px;font-size:10px}
+
+  /* cards */
+  .card,.card-sm{padding:13px 12px}
+
+  /* eBay grid 2 cols */
+  .ebay-grid{grid-template-columns:1fr 1fr !important}
+
+  /* inv url row */
+  .inv-url-row{flex-direction:column}
+  .inv-url-row input,.inv-url-row button{width:100%}
+
+  /* sub tabs */
+  .sub-tab-bar{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;padding-bottom:4px}
+  .sub-tab{flex-shrink:0;font-size:11px}
+
+  /* wishlist */
+  .wish-item{flex-wrap:wrap}
+  .wish-link{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+
+  /* modal */
+  .modal{margin:8px;border-radius:16px}
+
+  /* nw side card full width */
+  .nw-side-card{margin-top:0}
+  .nw-side-section{padding:12px 14px}
+  .nw-side-total{font-size:20px}
+  .kpi-v{font-size:20px}
+}
+
+/* ── SMALL PHONE (max 390px) ── */
+@media(max-width:390px){
+  .biz-tab{padding:8px 10px;font-size:10px}
+  .nw-amount{font-size:26px}
+  .kpi-v{font-size:18px}
+  .kpi-row{grid-template-columns:1fr 1fr !important}
+}
+
+/* ── DESKTOP SPECIFIC ── */
+@media(min-width:701px){
+  .hamburger{display:none !important}
+  .sidebar{transform:translateX(0) !important;box-shadow:none !important}
+  .main{margin-left:220px !important}
+  .sidebar-overlay{display:none !important}
+  /* desktop: overview 2-col */
+  #overview-main-grid{grid-template-columns:minmax(0,1fr) 340px}
+}
+
+@media(min-width:701px) and (max-width:960px){
+  .main{margin-left:220px}
+  #overview-main-grid{grid-template-columns:1fr}
+}
+
+
+/* views must fill width */
+.view{width:100%;max-width:100%;box-sizing:border-box}
+/* prevent any horizontal overflow */
+.main{overflow-x:hidden}
+.content{overflow-x:hidden;width:100%}
+/* business view containers fill width */
+[id^="biz-view-"]{width:100%}
+
+</style>
+</head>
+<body>
+
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+<div class="shell">
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sb-brand">
+    <div class="sb-logo">AMPM</div>
+    <div class="sb-tagline">Executive Dashboard</div>
+  </div>
+  <div class="sb-section">
+    <div class="sb-label">Overview</div>
+    <div class="sb-item active" onclick="nav(this,'overview');closeSidebarOnMobile()">
+      <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Net Worth Hub
+    </div>
+    <div class="sb-item" onclick="nav(this,'transactions');closeSidebarOnMobile()">
+      <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+      Transactions
+    </div>
+    <div class="sb-item" onclick="nav(this,'holdings');closeSidebarOnMobile()">
+      <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Holdings & Crypto
+    </div>
+  </div>
+  <div class="sb-section">
+    <div class="sb-label">Businesses</div>
+    <div class="sb-item" onclick="nav(this,'ampm_all');closeSidebarOnMobile()"><span class="dot" style="background:var(--gold)"></span>AMPM All</div>
+    <div class="sb-item" onclick="nav(this,'ampm_print');closeSidebarOnMobile()"><span class="dot" style="background:#A78BFA"></span>AMPM Print</div>
+    <div class="sb-item" onclick="nav(this,'byop');closeSidebarOnMobile()"><span class="dot" style="background:#C9A84C"></span>BYOP Vibes</div>
+    <div class="sb-item" onclick="nav(this,'nifty');closeSidebarOnMobile()"><span class="dot" style="background:#14B8A6"></span>Nifty Thrifty</div>
+    <div class="sb-item" onclick="nav(this,'cypher');closeSidebarOnMobile()"><span class="dot" style="background:#F472B6"></span>Cypher the Culture</div>
+  </div>
+  <div class="sb-section">
+    <div class="sb-label">Tools</div>
+    <div class="sb-item" onclick="nav(this,'bills');closeSidebarOnMobile()">
+      <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+      Bills & Net 30
+    </div>
+    <div class="sb-item" onclick="nav(this,'wishlist');closeSidebarOnMobile()">
+      <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+      Wishlist & Goals
+    </div>
+    <div class="sb-item" onclick="nav(this,'ampm_print');closeSidebarOnMobile()">
+      <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+      AMPM Print / Shirts
+    </div>
+  </div>
+  <div class="sb-footer">
+    <div class="sb-sync"><div class="sync-dot"></div> <span id="sync-label">Dashboard live</span></div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+      <div>
+        <div class="tb-greeting" id="greeting">Good morning, Rashad</div>
+        <div style="font-size:10px;color:var(--t2);margin-top:1px" id="tb-date"></div>
+      </div>
+    </div>
+    <div class="tb-right">
+      <button class="btn-sm btn-ghost" onclick="openModal('add-tx-modal')">+ Transaction</button>
+      <button class="btn-sm btn-ghost" onclick="openModal('add-asset-modal')">+ Asset</button>
+      <button class="btn-sm btn-gold" onclick="saveAll()">Save</button>
+      <div class="avatar">RC</div>
+    </div>
+  </div>
+
+  <!-- BIZ TABS -->
+  <div class="biz-tabs" id="biz-tabs-bar">
+    <button class="biz-tab active" data-view="overview" onclick="bizTab(this,'overview')">
+      <span class="tab-dot" style="background:var(--gold)"></span>AMPM Overview
+    </button>
+    <button class="biz-tab" data-view="byop" onclick="bizTab(this,'byop')">
+      <span class="tab-dot" style="background:var(--gold)"></span>BYOP Vibes
+    </button>
+    <button class="biz-tab" data-view="nifty" onclick="bizTab(this,'nifty')">
+      <span class="tab-dot" style="background:var(--teal)"></span>Nifty Thrifty
+    </button>
+    <button class="biz-tab" data-view="cypher" onclick="bizTab(this,'cypher')">
+      <span class="tab-dot" style="background:var(--rose)"></span>Cypher
+    </button>
+    <button class="biz-tab" data-view="ampm_print" onclick="bizTab(this,'ampm_print')">
+      <span class="tab-dot" style="background:var(--violet)"></span>AMPM Print
+    </button>
+    <button class="biz-tab" data-view="ampm_design" onclick="bizTab(this,'ampm_design')">
+      <span class="tab-dot" style="background:#60A5FA"></span>AMPM Design
+    </button>
+    <div style="flex-shrink:0;width:12px"></div><!-- right padding spacer -->
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content">
+
+  <!-- ════ OVERVIEW ════ -->
+  <div class="view active" id="view-overview">
+    <div class="g2" style="gap:14px;margin-bottom:14px;align-items:start" id="overview-main-grid">
+      <!-- LEFT: Net Worth Chart -->
+      <div style="grid-column:1/2">
+        <div class="nw-hero">
+          <div class="nw-label">Total Net Worth</div>
+          <div class="nw-amount neutral" id="nw-display">$0</div>
+          <div class="nw-change" id="nw-change-display"></div>
+          <div class="time-btns">
+            <button class="tb active" onclick="setTime(this,'1W')">1W</button>
+            <button class="tb" onclick="setTime(this,'1M')">1M</button>
+            <button class="tb" onclick="setTime(this,'3M')">3M</button>
+            <button class="tb" onclick="setTime(this,'YTD')">YTD</button>
+            <button class="tb" onclick="setTime(this,'ALL')">ALL</button>
+          </div>
+          <div class="chart-area"><canvas id="nwChart"></canvas></div>
+        </div>
+
+        <!-- KPI row -->
+        <div class="kpi-row">
+          <div class="kpi" style="--bar-color:var(--green)">
+            <div class="kpi-l">Total Assets</div>
+            <div class="kpi-v" id="kpi-assets">$0</div>
+            <div class="kpi-s">Equipment + Inventory + Cash</div>
+          </div>
+          <div class="kpi" style="--bar-color:var(--red)">
+            <div class="kpi-l">Total Liabilities</div>
+            <div class="kpi-v" id="kpi-liab">$0</div>
+            <div class="kpi-s">Bills + Credit outstanding</div>
+          </div>
+          <div class="kpi" style="--bar-color:var(--gold);cursor:pointer" onclick="promptCashUpdate()">
+            <div class="kpi-l">Cash on Hand</div>
+            <div class="kpi-v" id="cash-display">$6,000</div>
+            <div class="kpi-s">Click to update</div>
+          </div>
+          <div class="kpi" style="--bar-color:var(--teal)">
+            <div class="kpi-l">Inventory Value</div>
+            <div class="kpi-v" id="kpi-inv">$0</div>
+            <div class="kpi-s">All businesses combined</div>
+          </div>
+        </div>
+
+        <!-- Asset breakdown -->
+        <div class="g2" style="gap:12px">
+          <div class="card">
+            <div class="c-head">
+              <div class="c-title">Asset Breakdown</div>
+              <span style="font-size:11px;font-weight:700;color:var(--green)" id="assets-total-lbl">$0</span>
+            </div>
+            <div id="asset-bars"></div>
+          </div>
+          <div class="card">
+            <div class="c-head">
+              <div class="c-title">Revenue Mix</div>
+            </div>
+            <div style="position:relative;height:120px"><canvas id="mixChart"></canvas></div>
+            <div id="mix-legend" style="display:flex;flex-direction:column;gap:4px;margin-top:10px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Summary panels -->
+      <div class="gcol">
+        <!-- Net Worth Breakdown -->
+        <div class="nw-side-card">
+          <div class="nw-side-section nw-assets">
+            <div class="nw-side-label">Assets</div>
+            <div class="nw-side-total" id="nw-assets-big">$0</div>
+            <div class="asset-bar" style="margin-top:10px">
+              <div class="ab-label"><span>Cash</span><span id="pct-cash">55%</span></div>
+              <div class="ab-track"><div class="ab-fill" style="background:var(--green);width:55%" id="bar-cash"></div></div>
+            </div>
+            <div class="asset-bar">
+              <div class="ab-label"><span>Equipment</span><span id="pct-equip">20%</span></div>
+              <div class="ab-track"><div class="ab-fill" style="background:var(--blue);width:20%" id="bar-equip"></div></div>
+            </div>
+            <div class="asset-bar">
+              <div class="ab-label"><span>Inventory</span><span id="pct-inv-pct">15%</span></div>
+              <div class="ab-track"><div class="ab-fill" style="background:var(--gold);width:15%" id="bar-inv"></div></div>
+            </div>
+            <div class="asset-bar">
+              <div class="ab-label"><span>Holdings / Crypto</span><span id="pct-crypto">10%</span></div>
+              <div class="ab-track"><div class="ab-fill" style="background:var(--orange);width:10%" id="bar-crypto"></div></div>
+            </div>
+          </div>
+          <div class="nw-side-section nw-liab">
+            <div class="nw-side-label">Liabilities</div>
+            <div class="nw-side-total" id="nw-liab-big">$0</div>
+            <div class="asset-bar" style="margin-top:10px">
+              <div class="ab-label"><span>Monthly Bills</span><span id="pct-bills">80%</span></div>
+              <div class="ab-track"><div class="ab-fill" style="background:var(--red);width:80%" id="bar-bills"></div></div>
+            </div>
+            <div class="asset-bar">
+              <div class="ab-label"><span>Net 30 Outstanding</span><span id="pct-n30">20%</span></div>
+              <div class="ab-track"><div class="ab-fill" style="background:var(--orange);width:20%" id="bar-n30"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Calendar -->
+        <div class="card">
+          <div class="c-head">
+            <div class="c-title">Spending Calendar — <span id="cal-month">May 2026</span></div>
+            <div style="display:flex;gap:4px">
+              <button class="btn-sm btn-ghost" style="padding:3px 7px" onclick="calPrev()">‹</button>
+              <button class="btn-sm btn-ghost" style="padding:3px 7px" onclick="calNext()">›</button>
+            </div>
+          </div>
+          <div class="cal-grid" id="cal-labels">
+            <div class="cal-day-label">S</div><div class="cal-day-label">M</div><div class="cal-day-label">T</div><div class="cal-day-label">W</div><div class="cal-day-label">T</div><div class="cal-day-label">F</div><div class="cal-day-label">S</div>
+          </div>
+          <div class="cal-grid" id="cal-days"></div>
+          <div style="display:flex;gap:12px;margin-top:8px">
+            <div style="display:flex;align-items:center;gap:5px;font-size:9px;color:var(--t2)"><div style="width:8px;height:8px;border-radius:2px;background:rgba(34,197,94,0.15)"></div>Income</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:9px;color:var(--t2)"><div style="width:8px;height:8px;border-radius:2px;background:rgba(239,68,68,0.1)"></div>Expense</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:9px;color:var(--t2)"><div style="width:8px;height:8px;border-radius:2px;background:rgba(201,168,76,0.12)"></div>Both</div>
+          </div>
+        </div>
+
+        <!-- Holdings snapshot -->
+        <div class="card">
+          <div class="c-head">
+            <div class="c-title">Holdings & Crypto</div>
+            <button class="btn-sm btn-ghost" style="padding:4px 9px;font-size:10px" onclick="openModal('add-holding-modal')">+ Add</button>
+          </div>
+          <div id="holdings-list">
+            <div style="font-size:11px;color:var(--t3);text-align:center;padding:16px 0">No holdings yet — click + Add</div>
+          </div>
+        </div>
+
+        <!-- Upcoming bills -->
+        <div class="card">
+          <div class="c-head">
+            <div class="c-title">Upcoming Bills</div>
+            <span style="font-size:11px;color:var(--red);font-weight:700" id="bills-due-total"></span>
+          </div>
+          <div id="upcoming-bills"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Transactions -->
+    <div class="card" style="margin-top:2px">
+      <div class="c-head">
+        <div class="c-title">Recent Transactions</div>
+        <button class="btn-sm btn-ghost" style="padding:4px 9px;font-size:10px" onclick="openModal('add-tx-modal')">+ Add</button>
+      </div>
+      <div id="recent-tx"></div>
+    </div>
+  </div>
+
+  <!-- ════ TRANSACTIONS ════ -->
+  <div class="view" id="view-transactions">
+    <div class="card" style="margin-bottom:14px">
+      <div class="c-head">
+        <div class="c-title">All Transactions</div>
+        <div style="display:flex;gap:8px">
+          <select id="tx-filter-biz" onchange="renderAllTx()" style="font-size:11px;padding:5px 8px">
+            <option value="all">All Businesses</option>
+            <option value="ampm">AMPM</option>
+            <option value="byop">BYOP Vibes</option>
+            <option value="nifty">Nifty Thrifty</option>
+            <option value="cypher">Cypher</option>
+          </select>
+          <select id="tx-filter-type" onchange="renderAllTx()" style="font-size:11px;padding:5px 8px">
+            <option value="all">All Types</option>
+            <option value="income">Income</option>
+            <option value="expense">Expense</option>
+          </select>
+          <button class="btn-sm btn-gold" onclick="openModal('add-tx-modal')">+ Add</button>
+        </div>
+      </div>
+      <div id="all-tx"></div>
+    </div>
+  </div>
+
+  <!-- ════ HOLDINGS ════ -->
+  <div class="view" id="view-holdings">
+    <div class="g2">
+      <div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="c-head">
+            <div class="c-title">Stocks & Crypto Portfolio</div>
+            <button class="btn-sm btn-gold" onclick="openModal('add-holding-modal')">+ Add</button>
+          </div>
+          <div id="holdings-full"></div>
+        </div>
+        <div class="card">
+          <div class="c-title">Portfolio Value Chart</div>
+          <div style="position:relative;height:180px"><canvas id="holdingsChart"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="c-title">Portfolio Summary</div>
+        <div id="holdings-summary"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ BILLS & NET30 ════ -->
+  <div class="view" id="view-bills">
+    <div class="g2">
+      <div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="c-head">
+            <div class="c-title">Monthly Bills</div>
+            <button class="btn-sm btn-ghost" onclick="openModal('add-bill-modal')">+ Add</button>
+          </div>
+          <div id="bills-full"></div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="background:linear-gradient(135deg,#1a0a00,#1a1000);border-color:rgba(201,168,76,0.2)">
+          <div class="c-head">
+            <div class="c-title" style="color:var(--gold)">AMPM Net 30 Program</div>
+            <button class="btn-sm btn-ghost" onclick="openModal('add-n30-modal')">+ Invoice</button>
+          </div>
+          <div style="margin-bottom:12px">
+            <div class="sumrow"><span class="sumrow-label">Outstanding Balance</span><span class="sumrow-val gold" id="n30-total">$0</span></div>
+            <div class="sumrow"><span class="sumrow-label">Due This Month</span><span class="sumrow-val" id="n30-due">$0</span></div>
+            <div class="sumrow"><span class="sumrow-label">Paid This Month</span><span class="sumrow-val green" id="n30-paid">$0</span></div>
+          </div>
+          <div id="net30-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ WISHLIST ════ -->
+  <div class="view" id="view-wishlist">
+    <div class="card" style="margin-bottom:14px">
+      <div class="c-head">
+        <div class="c-title">Add Item to Wishlist</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label class="form-label">Paste Link</label>
+          <input id="wish-url" placeholder="https://amazon.com/..." onpaste="setTimeout(()=>previewLink(),100)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Item Name</label>
+          <input id="wish-name-input" placeholder="e.g. DTG Printer">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Price</label>
+          <input id="wish-price-input" placeholder="$0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Business</label>
+          <select id="wish-biz">
+            <option value="ampm">AMPM</option>
+            <option value="byop">BYOP Vibes</option>
+            <option value="nifty">Nifty Thrifty</option>
+            <option value="cypher">Cypher</option>
+            <option value="personal">Personal</option>
+          </select>
+        </div>
+      </div>
+      <div id="wish-preview" style="display:none;background:var(--card2);border-radius:var(--r);padding:10px;margin-bottom:10px">
+        <div style="font-size:10px;color:var(--gold);margin-bottom:4px">Link Preview</div>
+        <div id="wish-preview-content"></div>
+      </div>
+      <button class="btn-sm btn-gold" onclick="addWish()" style="padding:8px 18px">+ Add to Wishlist</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn-sm btn-ghost" onclick="filterWish('all')">All</button>
+      <button class="btn-sm btn-ghost" onclick="filterWish('ampm')">AMPM</button>
+      <button class="btn-sm btn-ghost" onclick="filterWish('byop')">BYOP</button>
+      <button class="btn-sm btn-ghost" onclick="filterWish('nifty')">Nifty</button>
+      <button class="btn-sm btn-ghost" onclick="filterWish('personal')">Personal</button>
+    </div>
+    <div id="wish-list"></div>
+  </div>
+
+  <!-- Inventory view redirects to print tab -->
+  <div class="view" id="view-inventory">
+    <div style="text-align:center;padding:48px;color:var(--t2)">T-Shirt inventory has moved to <strong style="color:var(--violet)">AMPM Print tab</strong>. Click AMPM Print in the business tabs above.</div></div>
+
+  <!-- ════ INDIVIDUAL BIZ VIEWS ════ -->
+  <div class="view" id="view-ampm_all">
+    <div id="biz-view-ampm_all"></div>
+  </div>
+  <div class="view" id="view-ampm_print">
+    <div id="biz-view-ampm_print"></div>
+    <!-- T-SHIRT INVENTORY SECTION -->
+    <div style="margin-top:14px">
+      <div class="sub-tab-bar">
+        <button class="sub-tab active" onclick="printSubTab(this,'shirts')">👕 T-Shirt Inventory</button>
+        <button class="sub-tab" onclick="printSubTab(this,'equipment')">🖨️ Equipment</button>
+        <button class="sub-tab" onclick="printSubTab(this,'orders')">📋 Print Orders</button>
+      </div>
+      <!-- SHIRTS -->
+      <div id="print-shirts">
+        <!-- AMPM Print Sync Banner -->
+        <div style="background:linear-gradient(135deg,rgba(167,139,250,0.07),rgba(167,139,250,0.03));border:1px solid rgba(167,139,250,0.2);border-radius:var(--r2);padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:#A78BFA;margin-bottom:2px">🔗 T-Shirt Inventory App — ampminventory.netlify.app</div>
+            <div style="font-size:11px;color:var(--t2)">Manage your Gildan and Bella Canvas stock. Updates here sync to your net worth automatically.</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <a href="https://ampminventory.netlify.app" target="_blank" style="padding:6px 13px;border-radius:8px;font-size:11px;font-weight:700;color:#A78BFA;background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.25);text-decoration:none;display:inline-flex;align-items:center;gap:5px">↗ Open App</a>
+          </div>
+        </div>
+
+        <div class="inv-connect" style="border-color:rgba(167,139,250,0.2);background:linear-gradient(135deg,rgba(167,139,250,0.06),rgba(167,139,250,0.02))">
+          <div style="font-size:13px;font-weight:700;color:#A78BFA;margin-bottom:4px">🔗 Sync from ampminventory.netlify.app</div>
+          <div style="font-size:11px;color:var(--t2);margin-bottom:10px">Paste your Google Apps Script URL — Gildan G5000 = $2.50 each, Bella Canvas 3001C = $3.00 each. Updates AMPM Print net worth in real time.</div>
+          <div class="inv-url-row">
+            <input id="sheets-url" placeholder="https://script.google.com/macros/s/YOUR_URL/exec" value="">
+            <button class="btn-sm btn-gold" onclick="connectInventory()">Connect</button>
+            <button class="btn-sm btn-ghost" onclick="loadSampleInventory()">Sample Data</button>
+          </div>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi" style="--bar-color:var(--violet)"><div class="kpi-l">Total Shirts</div><div class="kpi-v" id="inv-total-shirts">0</div><div class="kpi-s">All brands</div></div>
+          <div class="kpi" style="--bar-color:var(--gold)"><div class="kpi-l">Inventory Value</div><div class="kpi-v" id="inv-total-value">$0</div><div class="kpi-s">Toward net worth</div></div>
+          <div class="kpi" style="--bar-color:var(--teal)"><div class="kpi-l">Gildan G5000</div><div class="kpi-v" id="inv-gildan">0</div><div class="kpi-s">$2.50 each</div></div>
+          <div class="kpi" style="--bar-color:var(--rose)"><div class="kpi-l">Bella Canvas</div><div class="kpi-v" id="inv-bella">0</div><div class="kpi-s">$3.00 each</div></div>
+        </div>
+        <div class="card">
+          <div class="c-head">
+            <div class="c-title">Shirt Inventory — Live from Google Sheets</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn-sm btn-ghost" onclick="syncInventory()">↻ Sync</button>
+              <button class="btn-sm btn-gold" onclick="openModal('add-shirt-modal')">+ Add</button>
+            </div>
+          </div>
+          <div id="inv-status" style="font-size:11px;color:var(--t3);margin-bottom:10px">Not connected</div>
+          <div style="overflow-x:auto">
+            <table class="inv-table">
+              <thead><tr><th>Brand</th><th>Color</th><th>Size</th><th>Qty</th><th>Low Stock Alert</th><th>Value</th></tr></thead>
+              <tbody id="inv-table-body"><tr><td colspan="6" style="text-align:center;color:var(--t3);padding:18px">No data — connect Google Sheets or load sample</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <!-- EQUIPMENT -->
+      <div id="print-equipment" style="display:none">
+        <div class="card">
+          <div class="c-head"><div class="c-title">Print Equipment — AMPM Arsenal</div><button class="btn-sm btn-gold" onclick="openModal('add-asset-modal')">+ Add Asset</button></div>
+          <div id="print-equipment-list"></div>
+        </div>
+      </div>
+      <!-- ORDERS -->
+      <div id="print-orders" style="display:none">
+        <div class="card">
+          <div class="c-head"><div class="c-title">Print Orders</div><button class="btn-sm btn-gold" onclick="openModal('add-tx-modal')">+ Log Order</button></div>
+          <div id="print-orders-list">
+            <div style="font-size:11px;color:var(--t3);text-align:center;padding:16px">Log print orders as income transactions (biz: AMPM)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="view" id="view-byop">
+    <div id="biz-view-byop"></div>
+    <!-- ═══ BYOP VIBES INVENTORY ═══ -->
+    <div style="margin-top:14px">
+      <!-- BYOP Sync Banner -->
+      <div style="background:linear-gradient(135deg,rgba(201,168,76,0.07),rgba(201,168,76,0.03));border:1px solid rgba(201,168,76,0.18);border-radius:var(--r2);padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:2px">🔗 BYOP Inventory App — byopinventory.netlify.app</div>
+          <div style="font-size:11px;color:var(--t2)">Update quantities on the app, export, then import here to sync. After Supabase setup this will be automatic.</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0">
+          <a href="https://byopinventory.netlify.app" target="_blank" style="padding:6px 13px;border-radius:8px;font-size:11px;font-weight:700;color:var(--gold);background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.25);text-decoration:none">↗ Open App</a>
+          <button class="btn-sm btn-ghost" onclick="toggleByopSyncPanel()">📥 Import from BYOP App</button>
+          <button class="btn-sm btn-gold" onclick="doByopExport()">📤 Export to BYOP App</button>
+        </div>
+      </div>
+
+      <!-- BYOP SYNC — ultra simple, no JS attributes -->
+      <div id="byop-sync-panel" style="display:none;background:#1D1A24;border:1px solid rgba(201,168,76,0.3);border-radius:14px;padding:16px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;color:#C9A84C;margin-bottom:10px">📥 Import from byopinventory.netlify.app</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:8px;line-height:1.7">
+          1. Go to byopinventory.netlify.app → click <strong style="color:white">📤 Export to Dashboard</strong> → <strong style="color:white">Copy to Clipboard</strong><br>
+          2. Paste below → click Sync
+        </div>
+        <textarea id="byop-paste-area" placeholder="Paste exported JSON here..." style="width:100%;height:100px;background:#0F0D13;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:white;padding:10px;font-size:11px;font-family:monospace;resize:vertical;box-sizing:border-box;display:block"></textarea>
+        <div id="byop-sync-status" style="display:none;margin-top:8px;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="byop-sync-btn" onclick="byopSyncNow()" style="flex:1;padding:10px;background:#C9A84C;color:#0A0800;border:none;border-radius:8px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">↻ SYNC NOW</button>
+          <button id="byop-export-btn" onclick="byopExportNow()" style="flex:1;padding:10px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.1);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📤 Export</button>
+        </div>
+        <textarea id="byop-export-area" placeholder="Export will appear here..." style="display:none;width:100%;height:80px;background:#0F0D13;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.5);padding:10px;font-size:10px;font-family:monospace;resize:none;margin-top:8px;box-sizing:border-box"></textarea>
+      </div>
+
+      <div class="sub-tab-bar"><div class="sub-tab-bar">
+        <button class="sub-tab active" onclick="byopSubTab(this,'byop-kits')">📦 Party Kits</button>
+        <button class="sub-tab" onclick="byopSubTab(this,'byop-supplies')">🧾 Supplies</button>
+        <button class="sub-tab" onclick="byopSubTab(this,'byop-assembly')">✅ Assembly</button>
+        <button class="sub-tab" onclick="byopSubTab(this,'byop-value')">💰 Value</button>
+      </div>
+
+      <!-- KITS -->
+      <div id="byop-kits">
+        <div class="kpi-row" id="byop-kits-kpis" style="margin-bottom:14px"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2);font-weight:700">All Box Editions — Ready to Ship</div>
+          <div style="display:flex;gap:7px">
+            <select id="byop-kit-filter" onchange="renderByopKits()" style="font-size:11px;padding:5px 9px;background:var(--card2);border:1px solid var(--border);color:var(--t1);border-radius:8px">
+              <option value="all">All Types</option>
+              <option value="Regular">Regular Box</option>
+              <option value="Double XL">Double XL</option>
+              <option value="XL">XL Box</option>
+              <option value="Limited">Limited</option>
+            </select>
+            <button class="btn-sm btn-gold" onclick="openModal('byop-add-kit-modal')">+ Add Edition</button>
+          </div>
+        </div>
+        <div id="byop-kit-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px"></div>
+      </div>
+
+      <!-- SUPPLIES -->
+      <div id="byop-supplies" style="display:none">
+        <div class="kpi-row" id="byop-sup-kpis" style="margin-bottom:14px"></div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:13px">
+            <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2);font-weight:700">Component Supply Stock</div>
+            <div style="display:flex;gap:7px">
+              <select id="byop-sup-filter" onchange="renderByopSupplies()" style="font-size:11px;padding:5px 9px;background:var(--card2);border:1px solid var(--border);color:var(--t1);border-radius:8px">
+                <option value="all">All Categories</option>
+                <option value="box">Acrylic Boxes</option>
+                <option value="liquor">Liquor</option>
+                <option value="games">Games</option>
+                <option value="branded">Branded Items</option>
+                <option value="apparel">Apparel</option>
+                <option value="party">Party Supplies</option>
+                <option value="rtd">RTD / Cans</option>
+                <option value="packing">Packing</option>
+              </select>
+              <button class="btn-sm btn-gold" onclick="openModal('byop-add-supply-modal')">+ Add Supply</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="inv-table" id="byop-sup-table">
+              <thead><tr><th>Item</th><th>Category</th><th>In Stock</th><th>Low Alert</th><th>Unit Cost</th><th>Value</th><th>Status</th><th>Qty</th><th></th></tr></thead>
+              <tbody id="byop-sup-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ASSEMBLY -->
+      <div id="byop-assembly" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2);font-weight:700">Box Assembly — Active Builds</div>
+          <button class="btn-sm btn-gold" onclick="openModal('byop-assembly-modal')">+ New Build</button>
+        </div>
+        <div id="byop-assembly-list">
+          <div style="text-align:center;color:var(--t3);padding:24px;font-size:12px">No active builds — click + New Build when an order comes in</div>
+        </div>
+      </div>
+
+      <!-- VALUE -->
+      <div id="byop-value" style="display:none">
+        <div class="g2" style="margin-bottom:14px">
+          <div class="card"><div class="c-title">Kit Stock Value</div><div id="byop-kit-val-breakdown"></div></div>
+          <div class="card"><div class="c-title">Supply Stock Value</div><div id="byop-sup-val-breakdown"></div></div>
+        </div>
+        <div class="card"><div class="c-title">Total BYOP Net Worth</div><div id="byop-total-val"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="view" id="view-nifty">
+    <div id="biz-view-nifty"></div>
+    <!-- eBay LIVE STORE SECTION -->
+    <div class="ebay-connect" style="margin-top:14px">
+      <div class="ebay-connect-title">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        eBay Live Store — Nifty Thrifty Listings
+      </div>
+      <div style="font-size:11px;color:var(--t2);margin-bottom:10px">
+        Connected to: <strong style="color:var(--teal)">ebay.com/str/basketsandthings</strong> — all listings count as Nifty stock.
+        Uses Claude AI to fetch and parse live listings.
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-sm btn-gold" onclick="fetchEbayStore()">↻ Fetch Live Listings</button>
+        <button class="btn-sm btn-ghost" onclick="loadEbaySample()">Use Sample Data</button>
+        <button class="btn-sm btn-ghost" onclick="openModal('add-ebay-modal')">+ Add Manually</button>
+      </div>
+    </div>
+    <div id="ebay-status-bar" style="display:none"></div>
+    <div class="kpi-row" id="ebay-kpis" style="display:none">
+      <div class="kpi" style="--bar-color:var(--teal)"><div class="kpi-l">Active Listings</div><div class="kpi-v" id="ebay-count">0</div><div class="kpi-s">Live on eBay now</div></div>
+      <div class="kpi" style="--bar-color:var(--gold)"><div class="kpi-l">Stock Value</div><div class="kpi-v" id="ebay-value">$0</div><div class="kpi-s">At list price</div></div>
+      <div class="kpi" style="--bar-color:var(--green)"><div class="kpi-l">Total Items in Stock</div><div class="kpi-v" id="ebay-qty">0</div><div class="kpi-s">Qty across all listings</div></div>
+      <div class="kpi" style="--bar-color:var(--violet)"><div class="kpi-l">Avg Price</div><div class="kpi-v" id="ebay-avg">$0</div><div class="kpi-s">Per listing</div></div>
+    </div>
+    <div id="ebay-listings-wrap" style="display:none">
+      <div class="c-head" style="margin-bottom:8px">
+        <div class="c-title">Live Listings</div>
+        <div style="display:flex;gap:6px">
+          <select id="ebay-sort" onchange="renderEbayListings()" style="font-size:11px;padding:4px 8px">
+            <option value="price-desc">Price: High→Low</option>
+            <option value="price-asc">Price: Low→High</option>
+            <option value="title">Title A→Z</option>
+          </select>
+          <input id="ebay-search" placeholder="Search listings..." style="font-size:11px;width:160px" oninput="renderEbayListings()">
+        </div>
+      </div>
+      <div class="ebay-grid" id="ebay-grid"></div>
+    </div>
+    <!-- Transaction log from eBay sales -->
+    <div class="card" style="margin-top:14px">
+      <div class="c-head">
+        <div class="c-title">Nifty eBay Sales Log</div>
+        <button class="btn-sm btn-gold" onclick="openModal('add-ebay-sale-modal')">+ Log Sale</button>
+      </div>
+      <div id="nifty-sales-log">
+        <div style="font-size:11px;color:var(--t3);text-align:center;padding:14px">No sales logged yet — click + Log Sale after a sale closes</div>
+      </div>
+    </div>
+  </div>
+  <div class="view" id="view-cypher">
+    <div id="biz-view-cypher"></div>
+  </div>
+  <div class="view" id="view-ampm_design">
+    <div id="biz-view-ampm_design"></div>
+  </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+</div><!-- /shell -->
+
+<!-- MODALS -->
+<!-- Add Transaction -->
+<div class="modal-overlay" id="add-tx-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">Add Transaction</div><div class="modal-close" onclick="closeModal('add-tx-modal')">×</div></div>
+    <div class="form-group"><label class="form-label">Description</label><input id="tx-desc" placeholder="e.g. eBay sale — Nifty Thrifty"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Amount</label><input id="tx-amt" type="number" placeholder="0.00"></div>
+      <div class="form-group"><label class="form-label">Type</label><select id="tx-type"><option value="income">Income</option><option value="expense">Expense</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Business</label><select id="tx-biz"><option value="ampm">AMPM</option><option value="byop">BYOP Vibes</option><option value="nifty">Nifty Thrifty</option><option value="cypher">Cypher</option><option value="personal">Personal</option></select></div>
+      <div class="form-group"><label class="form-label">Date</label><input id="tx-date" type="date"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Icon (emoji)</label><input id="tx-icon" placeholder="💰" maxlength="2" value="💰"></div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:11px" onclick="addTransaction()">Add Transaction</button>
+  </div>
+</div>
+
+<!-- Add/Edit Asset -->
+<div class="modal-overlay" id="add-asset-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title" id="asset-modal-title">Add Asset</div><div class="modal-close" onclick="closeModal('add-asset-modal')">×</div></div>
+    <div class="form-group"><label class="form-label">Asset Name</label><input id="asset-name" placeholder="e.g. Cricut Maker 3 (×45)"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Current Value ($)</label><input id="asset-val" type="number" placeholder="0" step="0.01"></div>
+      <div class="form-group"><label class="form-label">Qty (optional)</label><input id="asset-qty" type="number" placeholder="1" min="1"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Category</label><select id="asset-cat"><option value="equipment">Equipment</option><option value="inventory">Inventory</option><option value="cash">Cash</option><option value="crypto">Crypto / Stocks</option><option value="vehicle">Vehicle</option><option value="other">Other</option></select></div>
+      <div class="form-group"><label class="form-label">Business</label><select id="asset-biz"><option value="ampm">AMPM</option><option value="byop">BYOP</option><option value="nifty">Nifty</option><option value="cypher">Cypher</option></select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes (purchase date, serial, etc.)</label><input id="asset-notes" placeholder="e.g. Bought Jan 2024, SN#12345"></div>
+    <input type="hidden" id="asset-edit-id" value="">
+    <button class="btn-sm btn-gold" style="width:100%;padding:11px" onclick="saveAsset()">Save Asset</button>
+  </div>
+</div>
+
+<!-- Add Holding -->
+<div class="modal-overlay" id="add-holding-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">Add Holding / Crypto</div><div class="modal-close" onclick="closeModal('add-holding-modal')">×</div></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Ticker / Name</label><input id="hold-name" placeholder="BTC"></div>
+      <div class="form-group"><label class="form-label">Full Name</label><input id="hold-full" placeholder="Bitcoin"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Quantity</label><input id="hold-qty" type="number" placeholder="0.001"></div>
+      <div class="form-group"><label class="form-label">Current Price ($)</label><input id="hold-price" type="number" placeholder="78000"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Type</label><select id="hold-type"><option value="crypto">Crypto</option><option value="stock">Stock</option></select></div>
+      <div class="form-group"><label class="form-label">Icon</label><input id="hold-icon" placeholder="₿" maxlength="2" value="₿"></div>
+    </div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:11px" onclick="addHolding()">Add Holding</button>
+  </div>
+</div>
+
+<!-- Add/Edit Bill -->
+<div class="modal-overlay" id="add-bill-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title" id="bill-modal-title">Add Bill</div><div class="modal-close" onclick="closeModal('add-bill-modal')">×</div></div>
+    <div class="form-group"><label class="form-label">Bill Name</label><input id="bill-name" placeholder="e.g. Electric Bill"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Amount ($)</label><input id="bill-amt" type="number" placeholder="0.00" step="0.01"></div>
+      <div class="form-group"><label class="form-label">Due Day of Month</label><input id="bill-due" type="number" min="0" max="31" placeholder="1 (0 = ongoing)"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Category</label><select id="bill-cat"><option>Rent</option><option>Utilities</option><option>Software</option><option>Mobile</option><option>Subscription</option><option>Transport</option><option>Credit</option><option>Insurance</option><option>Other</option></select></div>
+      <div class="form-group"><label class="form-label">Paid From (Card/Account)</label><input id="bill-card" placeholder="e.g. Chase Sapphire, Cash"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><input id="bill-notes" placeholder="Any extra details..."></div>
+    <input type="hidden" id="bill-edit-idx" value="">
+    <button class="btn-sm btn-gold" style="width:100%;padding:11px" onclick="saveBill()">Save Bill</button>
+  </div>
+</div>
+
+<!-- Add Net30 Invoice -->
+<div class="modal-overlay" id="add-n30-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">New Net 30 Invoice</div><div class="modal-close" onclick="closeModal('add-n30-modal')">×</div></div>
+    <div class="form-group"><label class="form-label">Client Name</label><input id="n30-client" placeholder="e.g. Baskets and Things"></div>
+    <div class="form-group"><label class="form-label">Service Description</label><input id="n30-desc" placeholder="e.g. Logo design + web update"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Total Value ($)</label><input id="n30-total-val" type="number" placeholder="1200"></div>
+      <div class="form-group"><label class="form-label">Net 30 Amount ($)</label><input id="n30-net-val" type="number" placeholder="620"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Invoice Date</label><input id="n30-date" type="date"></div>
+      <div class="form-group"><label class="form-label">Icon</label><input id="n30-icon" placeholder="🏢" maxlength="2" value="🏢"></div>
+    </div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:11px" onclick="addNet30()">Create Invoice</button>
+  </div>
+</div>
+
+<!-- Add Shirt (manual) -->
+<div class="modal-overlay" id="add-shirt-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">Add Shirts Manually</div><div class="modal-close" onclick="closeModal('add-shirt-modal')">×</div></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Brand</label><select id="shirt-brand"><option value="Gildan G5000">Gildan G5000 ($2.50)</option><option value="Bella Canvas 3001C">Bella Canvas 3001C ($3.00)</option></select></div>
+      <div class="form-group"><label class="form-label">Color</label><input id="shirt-color" placeholder="Black"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Size</label><select id="shirt-size"><option>S</option><option>M</option><option selected>L</option><option>XL</option><option>2XL</option></select></div>
+      <div class="form-group"><label class="form-label">Quantity</label><input id="shirt-qty" type="number" placeholder="12" min="1"></div>
+    </div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:11px" onclick="addShirtManual()">Add to Inventory</button>
+  </div>
+</div>
+
+<!-- Day detail modal -->
+<div class="modal-overlay" id="day-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title" id="day-modal-title">Day Detail</div><div class="modal-close" onclick="closeModal('day-modal')">×</div></div>
+    <div id="day-modal-content"></div>
+    <div style="margin-top:12px">
+      <button class="btn-sm btn-gold" style="width:100%;padding:9px" onclick="closeModal('day-modal');openModal('add-tx-modal')">+ Add Transaction for this Day</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Add eBay Listing Manually -->
+<div class="modal-overlay" id="add-ebay-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">Add eBay Listing Manually</div><div class="modal-close" onclick="closeModal('add-ebay-modal')">×</div></div>
+    <div class="form-group"><label class="form-label">Item Title</label><input id="ebay-title" placeholder="e.g. Dove Body Wash 32oz (Lot of 6)"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">List Price ($)</label><input id="ebay-price" type="number" placeholder="18.99"></div>
+      <div class="form-group"><label class="form-label">Qty Available</label><input id="ebay-qty-add" type="number" placeholder="1" min="1"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Category</label><input id="ebay-cat" placeholder="e.g. Health & Beauty"></div>
+    <div class="form-group"><label class="form-label">Image URL (optional)</label><input id="ebay-img" placeholder="https://..."></div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:10px" onclick="addEbayManual()">Add Listing</button>
+  </div>
+</div>
+
+<!-- Log eBay Sale -->
+<div class="modal-overlay" id="add-ebay-sale-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">Log eBay Sale</div><div class="modal-close" onclick="closeModal('add-ebay-sale-modal')">×</div></div>
+    <div class="form-group"><label class="form-label">Item Sold</label><input id="sale-title" placeholder="What sold?"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Sale Price ($)</label><input id="sale-price" type="number" placeholder="0.00"></div>
+      <div class="form-group"><label class="form-label">eBay Fees ($)</label><input id="sale-fees" type="number" placeholder="0.00"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Date Sold</label><input id="sale-date" type="date"></div>
+      <div class="form-group"><label class="form-label">Cost Basis ($)</label><input id="sale-cost" type="number" placeholder="0.00"></div>
+    </div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:10px" onclick="logEbaySale()">Log Sale</button>
+  </div>
+</div>
+
+
+<!-- BYOP Add Kit -->
+<div class="modal-overlay" id="byop-add-kit-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">Add Kit Edition</div><div class="modal-close" onclick="closeModal('byop-add-kit-modal')">×</div></div>
+    <div style="display:flex;gap:9px">
+      <div class="form-group" style="flex:2"><label class="form-label">Edition Name</label><input id="bk-name" placeholder="e.g. Hennessy Edition"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Type</label><select id="bk-type"><option>Regular</option><option>XL</option><option>Double XL</option><option>Limited</option></select></div>
+    </div>
+    <div style="display:flex;gap:9px">
+      <div class="form-group"><label class="form-label">Sell Price ($)</label><input id="bk-price" type="number" placeholder="209"></div>
+      <div class="form-group"><label class="form-label">Build Cost ($)</label><input id="bk-cost" type="number" placeholder="85"></div>
+      <div class="form-group"><label class="form-label">In Stock</label><input id="bk-stock" type="number" placeholder="0" min="0"></div>
+      <div class="form-group"><label class="form-label">Low Alert</label><input id="bk-low" type="number" placeholder="2"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Liquor</label><input id="bk-liquor" placeholder="e.g. Hennessy VS 750ml"></div>
+    <div class="form-group"><label class="form-label">Special Extras (comma separated)</label><input id="bk-extras" placeholder="e.g. 4x Shot Glasses, UNO Truth"></div>
+    <div style="display:flex;gap:9px">
+      <div class="form-group"><label class="form-label">Color Theme</label><input id="bk-color" placeholder="Gold on Black"></div>
+      <div class="form-group"><label class="form-label">Emoji</label><input id="bk-emoji" placeholder="🥃" maxlength="2" value="🥃"></div>
+    </div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:10px" onclick="saveByopKit()">Save Edition</button>
+  </div>
+</div>
+
+<!-- BYOP Add Supply -->
+<div class="modal-overlay" id="byop-add-supply-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">Add Supply Item</div><div class="modal-close" onclick="closeModal('byop-add-supply-modal')">×</div></div>
+    <div class="form-group"><label class="form-label">Item Name</label><input id="bs-name" placeholder="e.g. Acrylic Box — Regular"></div>
+    <div class="form-group"><label class="form-label">Category</label>
+      <select id="bs-cat">
+        <option value="box">📦 Acrylic Boxes</option>
+        <option value="liquor">🥃 Liquor</option>
+        <option value="games">🃏 Games</option>
+        <option value="branded">🎨 Branded Items</option>
+        <option value="apparel">👕 Apparel</option>
+        <option value="party">🎉 Party Supplies</option>
+        <option value="rtd">🥤 RTD / Cans</option>
+        <option value="packing">📬 Packing</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:9px">
+      <div class="form-group"><label class="form-label">Qty in Stock</label><input id="bs-qty" type="number" placeholder="0" min="0"></div>
+      <div class="form-group"><label class="form-label">Low Alert At</label><input id="bs-low" type="number" placeholder="5"></div>
+      <div class="form-group"><label class="form-label">Unit Cost ($)</label><input id="bs-cost" type="number" placeholder="0.00" step="0.01"></div>
+    </div>
+    <div style="display:flex;gap:9px">
+      <div class="form-group" style="flex:2"><label class="form-label">Variant / Detail</label><input id="bs-variant" placeholder="e.g. Silver, Size M, 750ml"></div>
+      <div class="form-group"><label class="form-label">Emoji</label><input id="bs-emoji" placeholder="📦" maxlength="2"></div>
+    </div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:10px" onclick="saveByopSupply()">Add to Stock</button>
+  </div>
+</div>
+
+<!-- BYOP Assembly -->
+<div class="modal-overlay" id="byop-assembly-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">New Box Build</div><div class="modal-close" onclick="closeModal('byop-assembly-modal')">×</div></div>
+    <div class="form-group"><label class="form-label">Order / Customer Name</label><input id="ba-name" placeholder="e.g. John D. — Don Julio Edition"></div>
+    <div class="form-group"><label class="form-label">Edition</label><select id="ba-edition"></select></div>
+    <div class="form-group"><label class="form-label">Notes</label><input id="ba-notes" placeholder="Delivery notes, shirt size, special requests..."></div>
+    <button class="btn-sm btn-gold" style="width:100%;padding:10px" onclick="createByopAssembly()">Start Build</button>
+  </div>
+</div>
+
+
+<!-- BYOP sync now inline in tab -->
+<div class="toast" id="toast"><span id="toast-msg"></span></div>
+
+<script>
+// ══════════════════════════════════════════════════
+// STATE — loads from localStorage
+// ══════════════════════════════════════════════════
+const STORE_KEY = 'ampm_dash_v1';
+let S = {
+  cash: 6000,
+  assets: [
+    {id:'a1',name:'Cricut Maker 3 (×45)',value:11250,cat:'equipment',biz:'ampm',notes:'45 machines × $250 est.'},
+    {id:'a2',name:'Cricut Joy (×45)',value:4500,cat:'equipment',biz:'ampm',notes:'45 × $100 est.'},
+    {id:'a3',name:'Heat Press (×3)',value:1500,cat:'equipment',biz:'ampm',notes:'3 × $500 est.'},
+    {id:'a4',name:'HP Printer Fleet',value:3000,cat:'equipment',biz:'ampm',notes:'Edit to your actual value'},
+    {id:'a5',name:'85" Smart TV',value:800,cat:'equipment',biz:'ampm',notes:''},
+    {id:'a6',name:'Glass Conference Desk',value:600,cat:'equipment',biz:'ampm',notes:''},
+    {id:'a7',name:'Nifty Inventory (at cost)',value:5000,cat:'inventory',biz:'nifty',notes:'Update as stock changes'},
+  ],
+  liabilities: [
+    {name:'Revolving Credit',value:200,cat:'credit'},
+  ],
+  transactions: [],
+  holdings: [
+    {name:'ETH',full:'Ethereum',qty:0.1,price:2750,type:'crypto',icon:'⟠',change:5.3},
+    {name:'BTC',full:'Bitcoin',qty:0.001,price:78000,type:'crypto',icon:'₿',change:-2.1},
+    {name:'XRP',full:'Ripple',qty:50,price:1.37,type:'crypto',icon:'◈',change:-1.5},
+  ],
+  bills: [
+    {name:'Rent — Business House',amt:2000,due:1,cat:'Rent',paid:true},
+    {name:'Electric (print room)',amt:300,due:5,cat:'Utilities',paid:false},
+    {name:'T-Mobile (2 lines)',amt:180,due:8,cat:'Mobile',paid:false},
+    {name:'Internet',amt:100,due:10,cat:'Utilities',paid:false},
+    {name:'Shopify × 3 (annual)',amt:73,due:15,cat:'Software',paid:true},
+    {name:'Software Suite',amt:185,due:15,cat:'Software',paid:true},
+    {name:'Constant Contact',amt:30,due:15,cat:'Software',paid:false},
+    {name:'Amazon Prime × 2',amt:30,due:18,cat:'Subscription',paid:false},
+    {name:'Nifty Sourcing Sub',amt:50,due:20,cat:'Subscription',paid:false},
+    {name:'Cypher — Supabase',amt:27,due:20,cat:'Software',paid:true},
+    {name:'Vehicle / Transport',amt:200,due:0,cat:'Other',paid:false},
+    {name:'Revolving Credit',amt:40,due:25,cat:'Other',paid:false},
+  ],
+  net30: [
+    {client:'Baskets and Things',desc:'Brand refresh + social graphics',total:1200,net30:600,date:'2026-05-01',due:'2026-05-31',status:'due',icon:'🧺'},
+    {client:'Apple the Fix',desc:'Website update + flyers',total:850,net30:425,date:'2026-04-15',due:'2026-05-15',status:'paid',icon:'🔧'},
+  ],
+  wishlist: [
+    {name:'DTG Direct-to-Garment Printer',url:'https://amazon.com',price:3500,biz:'ampm',done:false,emoji:'🖨️'},
+    {name:'Studio Lighting Kit',url:'https://amazon.com',price:200,biz:'ampm',done:false,emoji:'💡'},
+    {name:'4K Camera — Content Studio',url:'https://amazon.com',price:750,biz:'ampm',done:false,emoji:'📷'},
+    {name:'Vendoo Cross-Listing Tool (Annual)',url:'https://vendoo.co',price:360,biz:'nifty',done:false,emoji:'📦'},
+    {name:'Outdoor Fire Pit',url:'https://amazon.com',price:120,biz:'ampm',done:false,emoji:'🔥'},
+  ],
+  inventory: [],
+  sheetsUrl: '',
+  nwHistory: [],
+  calYear: new Date().getFullYear(),
+  calMonth: new Date().getMonth(),
+};
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORE_KEY);
+    if(raw){ const parsed=JSON.parse(raw); S={...S,...parsed}; }
+  }catch(e){}
+}
+function saveState(){
+  try{localStorage.setItem(STORE_KEY,JSON.stringify(S));}catch(e){}
+}
+function saveAll(){saveState();toast('Dashboard saved ✓');}
+loadState();
+
+// ══════════════════════════════════════════════════
+// NET WORTH CALCULATION
+// ══════════════════════════════════════════════════
+function calcNW(){
+  let assets = S.cash;
+  // equipment + custom assets
+  S.assets.forEach(a=>{ assets+=a.value; });
+  // inventory shirts
+  assets += invValue();
+  // holdings
+  S.holdings.forEach(h=>{ assets += h.qty * h.price; });
+
+  let liab = 0;
+  S.liabilities.forEach(l=>{ liab+=l.value; });
+  // Net30 outstanding
+  S.net30.filter(n=>n.status!=='paid').forEach(n=>{ liab+=n.net30; });
+
+  const nw = assets - liab;
+  return {nw, assets, liab};
+}
+
+function invValue(){
+  let v = 0;
+  S.inventory.forEach(item=>{
+    const price = item.brand.toLowerCase().includes('bella') ? 3.0 : 2.5;
+    v += (item.qty||0) * price;
+  });
+  // Also from assets tagged inventory
+  return v;
+}
+
+function updateNWDisplay(){
+  const {nw,assets,liab} = calcNW();
+
+  const el = document.getElementById('nw-display');
+  el.textContent = fmt(nw);
+  el.className = 'nw-amount ' + (nw>0?'pos':nw<0?'neg':'neutral');
+
+  document.getElementById('kpi-assets').textContent = fmt(assets);
+  document.getElementById('kpi-liab').textContent = fmt(liab);
+  document.getElementById('kpi-inv').textContent = fmt(invValue() + S.assets.filter(a=>a.cat==='inventory').reduce((s,a)=>s+a.value,0));
+  document.getElementById('nw-assets-big').textContent = fmt(assets);
+  document.getElementById('nw-liab-big').textContent = fmt(liab);
+  document.getElementById('assets-total-lbl').textContent = fmt(assets);
+
+  // Asset breakdown bars
+  const cash = S.cash;
+  const equip = S.assets.filter(a=>a.cat==='equipment').reduce((s,a)=>s+a.value,0);
+  const inv2 = invValue() + S.assets.filter(a=>a.cat==='inventory').reduce((s,a)=>s+a.value,0);
+  const crypto = S.holdings.reduce((s,h)=>s+h.qty*h.price,0);
+  const pct = (v)=> assets>0?Math.round(v/assets*100)+'%':'0%';
+  const w = (v)=> assets>0?Math.min(Math.round(v/assets*100),100)+'%':'0%';
+
+  document.getElementById('pct-cash').textContent=pct(cash);
+  document.getElementById('bar-cash').style.width=w(cash);
+  document.getElementById('pct-equip').textContent=pct(equip);
+  document.getElementById('bar-equip').style.width=w(equip);
+  document.getElementById('pct-inv-pct').textContent=pct(inv2);
+  document.getElementById('bar-inv').style.width=w(inv2);
+  document.getElementById('pct-crypto').textContent=pct(crypto);
+  document.getElementById('bar-crypto').style.width=w(crypto);
+
+  const billsLiab = S.bills.filter(b=>!b.paid).reduce((s,b)=>s+b.amt,0);
+  const n30Liab = S.net30.filter(n=>n.status!=='paid').reduce((s,n)=>s+n.net30,0);
+  document.getElementById('pct-bills').textContent=liab>0?Math.round(billsLiab/liab*100)+'%':'0%';
+  document.getElementById('bar-bills').style.width=liab>0?Math.min(Math.round(billsLiab/liab*100),100)+'%':'0%';
+  document.getElementById('pct-n30').textContent=liab>0?Math.round(n30Liab/liab*100)+'%':'0%';
+  document.getElementById('bar-n30').style.width=liab>0?Math.min(Math.round(n30Liab/liab*100),100)+'%':'0%';
+
+  // Asset bars detail
+  const ab = document.getElementById('asset-bars');
+  const assetGroups = [
+    {label:'Cash on Hand',val:cash,color:'var(--green)'},
+    {label:'Equipment',val:equip,color:'var(--blue)'},
+    {label:'Inventory (cost basis)',val:inv2,color:'var(--gold)'},
+    {label:'Crypto / Stocks',val:crypto,color:'var(--orange)'},
+  ];
+  ab.innerHTML = assetGroups.map(g=>`
+    <div class="asset-bar">
+      <div class="ab-label"><span>${g.label}</span><span>${fmt(g.val)}</span></div>
+      <div class="ab-track"><div class="ab-fill" style="background:${g.color};width:${w(g.val)}"></div></div>
+    </div>
+  `).join('');
+
+  const adEl = document.getElementById('asset-list-detail');
+  if(adEl){
+    adEl.innerHTML = S.assets.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2);font-size:12px"><span style="flex:1;color:var(--t1)">${a.name}</span><span style="font-weight:700;color:var(--gold)">${fmt(a.value)}</span><button onclick="editAsset('${a.id}')" style="background:none;border:none;cursor:pointer;color:var(--t2);font-size:11px;padding:1px 4px">✏️</button><button onclick="deleteAsset('${a.id}')" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:10px;padding:1px 4px;opacity:.5">✕</button></div>`).join('')||'<div style="color:var(--t3);font-size:11px;padding:4px 0">No assets yet</div>';
+  }
+  // NW change
+  const prev = S.nwHistory.length>1?S.nwHistory[S.nwHistory.length-2]:nw;
+  const diff = nw - prev;
+  const chgEl = document.getElementById('nw-change-display');
+  if(diff!==0){
+    chgEl.textContent=(diff>0?'+':'')+fmt(diff)+' from last period';
+    chgEl.className='nw-change '+(diff>0?'up':'down');
+  }
+
+  // Update nwHistory
+  const today = new Date().toISOString().slice(0,10);
+  const last = S.nwHistory[S.nwHistory.length-1];
+  if(!last||last.date!==today){
+    S.nwHistory.push({date:today,value:nw});
+    if(S.nwHistory.length>365) S.nwHistory.shift();
+  }
+}
+
+function fmt(n){ return (n<0?'-$':'$')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+
+// ══════════════════════════════════════════════════
+// CHARTS
+// ══════════════════════════════════════════════════
+Chart.defaults.color='rgba(255,255,255,0.35)';
+Chart.defaults.borderColor='rgba(255,255,255,0.05)';
+Chart.defaults.font.family='Inter';
+Chart.defaults.font.size=10;
+
+let nwChartInst;
+function initNWChart(){
+  const ctx=document.getElementById('nwChart');
+  if(!ctx)return;
+  const labels=[], data=[];
+  // Generate demo data if history is short
+  const {nw}=calcNW();
+  if(S.nwHistory.length<7){
+    for(let i=6;i>=1;i--){const d=new Date();d.setDate(d.getDate()-i);labels.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));data.push(nw-(Math.random()*2000-500));}
+  } else {
+    S.nwHistory.slice(-30).forEach(h=>{labels.push(h.date.slice(5));data.push(h.value);});
+  }
+  labels.push('Today'); data.push(nw);
+
+  if(nwChartInst)nwChartInst.destroy();
+  nwChartInst=new Chart(ctx,{
+    type:'line',
+    data:{labels,datasets:[{
+      data,
+      borderColor:'#3B82F6',
+      backgroundColor:'rgba(59,130,246,0.08)',
+      borderWidth:2,fill:true,tension:0.4,
+      pointRadius:0,pointHoverRadius:4,pointHoverBackgroundColor:'#3B82F6'
+    }]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.parsed.y)}}},
+      scales:{x:{grid:{display:false},ticks:{maxTicksLimit:6}},y:{ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}
+    }
+  });
+}
+
+let mixChartInst;
+function initMixChart(){
+  const ctx=document.getElementById('mixChart');
+  if(!ctx)return;
+  if(mixChartInst)mixChartInst.destroy();
+  // Revenue by biz
+  const revByBiz={ampm:0,byop:0,nifty:0,cypher:0};
+  S.transactions.filter(t=>t.type==='income').forEach(t=>{revByBiz[t.biz]=(revByBiz[t.biz]||0)+t.amt;});
+  const labels=Object.keys(revByBiz).map(k=>k.toUpperCase());
+  const vals=Object.values(revByBiz);
+  const colors=['#C9A84C','#C9A84C','#14B8A6','#F472B6'];
+  mixChartInst=new Chart(ctx,{
+    type:'doughnut',
+    data:{labels,datasets:[{data:vals,backgroundColor:['#A78BFA','#C9A84C','#14B8A6','#F472B6'],borderWidth:0,hoverOffset:3}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.parsed)}}}}
+  });
+  const leg=document.getElementById('mix-legend');
+  if(leg){
+    const cl=['#A78BFA','#C9A84C','#14B8A6','#F472B6'];
+    leg.innerHTML=labels.map((l,i)=>`<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t2)"><span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${cl[i]};margin-right:5px"></span>${l}</span><span>${fmt(vals[i])}</span></div>`).join('');
+  }
+}
+
+let holdingsChartInst;
+function initHoldingsChart(){
+  const ctx=document.getElementById('holdingsChart');
+  if(!ctx)return;
+  if(holdingsChartInst)holdingsChartInst.destroy();
+  const labels=S.holdings.map(h=>h.name);
+  const vals=S.holdings.map(h=>h.qty*h.price);
+  const colors=['#F97316','#F59E0B','#3B82F6','#8B5CF6','#EC4899'];
+  holdingsChartInst=new Chart(ctx,{
+    type:'doughnut',
+    data:{labels,datasets:[{data:vals,backgroundColor:colors.slice(0,labels.length),borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{display:true,position:'right',labels:{boxWidth:8,usePointStyle:true}},tooltip:{callbacks:{label:c=>fmt(c.parsed)}}}}
+  });
+}
+
+// ══════════════════════════════════════════════════
+// CALENDAR
+// ══════════════════════════════════════════════════
+function renderCalendar(){
+  const y=S.calYear, m=S.calMonth;
+  const today=new Date();
+  document.getElementById('cal-month').textContent=new Date(y,m,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+
+  const firstDay=new Date(y,m,1).getDay();
+  const daysInMonth=new Date(y,m+1,0).getDate();
+
+  // Build day map from transactions
+  const dayMap={};
+  S.transactions.forEach(t=>{
+    const d=new Date(t.date);
+    if(d.getFullYear()===y&&d.getMonth()===m){
+      const day=d.getDate();
+      if(!dayMap[day])dayMap[day]={income:0,expense:0};
+      if(t.type==='income')dayMap[day].income+=t.amt;
+      else dayMap[day].expense+=t.amt;
+    }
+  });
+
+  const grid=document.getElementById('cal-days');
+  let html='';
+  for(let i=0;i<firstDay;i++) html+=`<div class="cal-day empty"></div>`;
+  for(let d=1;d<=daysInMonth;d++){
+    const dm=dayMap[d];
+    const isToday=today.getDate()===d&&today.getMonth()===m&&today.getFullYear()===y;
+    let cls='cal-day';
+    if(dm&&dm.income>0&&dm.expense>0)cls+=' has-both';
+    else if(dm&&dm.income>0)cls+=' has-income';
+    else if(dm&&dm.expense>0)cls+=' has-expense';
+    if(isToday)cls+=' today';
+    const tipAmt=dm?`${dm.income>0?'+'+fmt(dm.income):''}${dm.expense>0?' -'+fmt(dm.expense):''}`:d;
+    html+=`<div class="${cls}" title="${tipAmt}" onclick="showDayDetail(${d})">${d}</div>`;
+  }
+  grid.innerHTML=html;
+}
+
+function calPrev(){S.calMonth--;if(S.calMonth<0){S.calMonth=11;S.calYear--;}renderCalendar();}
+function calNext(){S.calMonth++;if(S.calMonth>11){S.calMonth=0;S.calYear++;}renderCalendar();}
+
+function showDayDetail(day){
+  const y=S.calYear,m=S.calMonth;
+  const dateStr=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  const txs=S.transactions.filter(t=>t.date===dateStr);
+  document.getElementById('day-modal-title').textContent=new Date(y,m,day).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+  const income=txs.filter(t=>t.type==='income');
+  const exp=txs.filter(t=>t.type==='expense');
+  const totalIn=income.reduce((s,t)=>s+t.amt,0);
+  const totalOut=exp.reduce((s,t)=>s+t.amt,0);
+  document.getElementById('day-modal-content').innerHTML=`
+    <div style="display:flex;gap:12px;margin-bottom:14px">
+      <div style="flex:1;background:rgba(34,197,94,0.08);border-radius:10px;padding:12px"><div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin-bottom:4px">Income</div><div style="font-size:20px;font-weight:800;color:var(--green)">${fmt(totalIn)}</div></div>
+      <div style="flex:1;background:rgba(239,68,68,0.08);border-radius:10px;padding:12px"><div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--red);margin-bottom:4px">Expenses</div><div style="font-size:20px;font-weight:800;color:var(--red)">${fmt(totalOut)}</div></div>
+    </div>
+    ${txs.length===0?'<div style="text-align:center;color:var(--t3);padding:16px">No transactions this day</div>':''}
+    ${txs.map(t=>`<div class="tx-item"><div class="tx-icon">${t.icon||'💰'}</div><div><div class="tx-desc">${t.desc}</div><div class="tx-date">${t.biz.toUpperCase()}</div></div><div class="tx-amt ${t.type==='income'?'in':'out'}">${t.type==='income'?'+':'-'}${fmt(t.amt)}</div></div>`).join('')}
+  `;
+  openModal('day-modal');
+}
+
+// ══════════════════════════════════════════════════
+// TRANSACTIONS
+// ══════════════════════════════════════════════════
+function renderRecentTx(){
+  const el=document.getElementById('recent-tx');
+  if(!el)return;
+  const sorted=[...S.transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,8);
+  el.innerHTML=sorted.length?sorted.map(t=>`
+    <div class="tx-item">
+      <div class="tx-icon">${t.icon||'💰'}</div>
+      <div style="flex:1">
+        <div class="tx-desc">${t.desc}</div>
+        <div class="tx-date">${new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})} · ${t.biz.toUpperCase()}</div>
+      </div>
+      <div class="tx-amt ${t.type==='income'?'in':'out'}">${t.type==='income'?'+':'-'}${fmt(t.amt)}</div>
+    </div>
+  `).join(''):'<div style="text-align:center;color:var(--t3);padding:16px">No transactions yet</div>';
+}
+
+function renderAllTx(){
+  const el=document.getElementById('all-tx');
+  if(!el)return;
+  const biz=document.getElementById('tx-filter-biz')?.value||'all';
+  const type=document.getElementById('tx-filter-type')?.value||'all';
+  let txs=[...S.transactions].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  if(biz!=='all')txs=txs.filter(t=>t.biz===biz);
+  if(type!=='all')txs=txs.filter(t=>t.type===type);
+  const totalIn=txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
+  const totalOut=txs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+  el.innerHTML=`<div style="display:flex;gap:16px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+    <div><div style="font-size:9px;color:var(--t2);text-transform:uppercase;letter-spacing:.1em">Total In</div><div style="font-size:18px;font-weight:800;color:var(--green)">${fmt(totalIn)}</div></div>
+    <div><div style="font-size:9px;color:var(--t2);text-transform:uppercase;letter-spacing:.1em">Total Out</div><div style="font-size:18px;font-weight:800;color:var(--red)">${fmt(totalOut)}</div></div>
+    <div><div style="font-size:9px;color:var(--t2);text-transform:uppercase;letter-spacing:.1em">Net</div><div style="font-size:18px;font-weight:800;color:${totalIn-totalOut>=0?'var(--green)':'var(--red)'}">${fmt(totalIn-totalOut)}</div></div>
+  </div>`+
+  (txs.length?txs.map(t=>`
+    <div class="tx-item">
+      <div class="tx-icon">${t.icon||'💰'}</div>
+      <div style="flex:1">
+        <div class="tx-desc">${t.desc}</div>
+        <div class="tx-date">${new Date(t.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})} · ${t.biz.toUpperCase()}</div>
+      </div>
+      <div class="tx-amt ${t.type==='income'?'in':'out'}">${t.type==='income'?'+':'-'}${fmt(t.amt)}</div>
+    </div>
+  `).join(''):'<div style="text-align:center;color:var(--t3);padding:20px">No transactions found</div>');
+}
+
+function addTransaction(){
+  const desc=document.getElementById('tx-desc').value;
+  const amt=parseFloat(document.getElementById('tx-amt').value)||0;
+  const type=document.getElementById('tx-type').value;
+  const biz=document.getElementById('tx-biz').value;
+  const date=document.getElementById('tx-date').value||new Date().toISOString().slice(0,10);
+  const icon=document.getElementById('tx-icon').value||'💰';
+  if(!desc||!amt){toast('Fill in description and amount');return;}
+  S.transactions.unshift({desc,amt,type,biz,date,icon});
+  saveState();closeModal('add-tx-modal');
+  renderRecentTx();renderAllTx();updateNWDisplay();renderCalendar();initMixChart();
+  document.getElementById('tx-desc').value='';document.getElementById('tx-amt').value='';
+  toast('Transaction added ✓');
+}
+
+// ══════════════════════════════════════════════════
+// ASSETS
+// ══════════════════════════════════════════════════
+function saveAsset(){
+  const name=document.getElementById('asset-name').value;
+  const val=parseFloat(document.getElementById('asset-val').value)||0;
+  const qty=parseInt(document.getElementById('asset-qty').value)||1;
+  const cat=document.getElementById('asset-cat').value;
+  const biz=document.getElementById('asset-biz').value;
+  const notes=document.getElementById('asset-notes').value;
+  if(!name){toast('Enter asset name');return;}
+  const value=val*qty;
+  const editId=document.getElementById('asset-edit-id').value;
+  const obj={id:editId||'a'+Date.now(),name,value,unitVal:val,qty,cat,biz,notes};
+  if(editId){
+    const idx=S.assets.findIndex(a=>a.id===editId);
+    if(idx>=0) S.assets[idx]=obj; else S.assets.push(obj);
+    toast('Asset updated ✓');
+  } else {
+    S.assets.push(obj);
+    toast('Asset added ✓');
+  }
+  saveState();closeModal('add-asset-modal');
+  document.getElementById('asset-edit-id').value='';
+  document.getElementById('asset-modal-title').textContent='Add Asset';
+  updateNWDisplay();renderAssetList();
+}
+function addAsset(){ saveAsset(); } // legacy
+function editAsset(id){
+  const a=S.assets.find(a=>a.id===id);
+  if(!a)return;
+  document.getElementById('asset-modal-title').textContent='Edit Asset';
+  document.getElementById('asset-name').value=a.name||'';
+  document.getElementById('asset-val').value=a.unitVal||a.value||0;
+  document.getElementById('asset-qty').value=a.qty||1;
+  document.getElementById('asset-cat').value=a.cat||'equipment';
+  document.getElementById('asset-biz').value=a.biz||'ampm';
+  document.getElementById('asset-notes').value=a.notes||'';
+  document.getElementById('asset-edit-id').value=a.id;
+  openModal('add-asset-modal');
+}
+function deleteAsset(id){
+  if(confirm('Remove this asset?')){
+    S.assets=S.assets.filter(a=>a.id!==id);
+    saveState();updateNWDisplay();renderAssetList();toast('Asset removed');
+  }
+}
+function renderAssetList(){
+  // Render in the financials asset breakdown card
+  const el=document.getElementById('asset-bars');
+  if(!el)return;
+  const cash=S.cash;
+  const equip=S.assets.filter(a=>a.cat==='equipment').reduce((s,a)=>s+a.value,0);
+  const inv=invValue()+S.assets.filter(a=>a.cat==='inventory').reduce((s,a)=>s+a.value,0);
+  const crypto=S.holdings.reduce((s,h)=>s+h.qty*h.price,0);
+  const total=cash+equip+inv+crypto||1;
+  const w=(v)=>Math.min(Math.round(v/total*100),100)+'%';
+  el.innerHTML=[
+    {label:'Cash on Hand',val:cash,color:'var(--green)'},
+    {label:'Equipment',val:equip,color:'var(--blue)'},
+    {label:'Inventory (cost)',val:inv,color:'var(--gold)'},
+    {label:'Crypto/Stocks',val:crypto,color:'var(--orange)'},
+  ].map(g=>`<div class="asset-bar"><div class="ab-label"><span>${g.label}</span><span>${fmt(g.val)}</span></div><div class="ab-track"><div class="ab-fill" style="background:${g.color};width:${w(g.val)}"></div></div></div>`).join('');
+}
+
+function updateCash(el){
+  const v=parseFloat((el.textContent||'').replace(/[^0-9.]/g,''))||0;
+  S.cash=v;
+  el.textContent='$'+v.toLocaleString();
+  saveState();updateNWDisplay();
+}
+
+// ══════════════════════════════════════════════════
+// HOLDINGS
+// ══════════════════════════════════════════════════
+function renderHoldings(){
+  ['holdings-list','holdings-full'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    el.innerHTML=S.holdings.length?S.holdings.map((h,i)=>`
+      <div class="holding-row">
+        <div class="hold-icon">${h.icon}</div>
+        <div>
+          <div class="hold-name">${h.name}</div>
+          <div class="hold-sub">${h.full} · ${h.qty} units</div>
+        </div>
+        <div class="hold-right">
+          <div class="hold-val">${fmt(h.qty*h.price)}</div>
+          <div class="hold-chg ${h.change>=0?'up':'down'}">${h.change>=0?'+':''}${h.change}%</div>
+        </div>
+      </div>
+    `).join(''):'<div style="font-size:11px;color:var(--t3);padding:12px 0">No holdings</div>';
+  });
+
+  const hs=document.getElementById('holdings-summary');
+  if(hs){
+    const total=S.holdings.reduce((s,h)=>s+h.qty*h.price,0);
+    hs.innerHTML=S.holdings.map(h=>`
+      <div class="sumrow">
+        <span class="sumrow-label">${h.icon} ${h.name}</span>
+        <span class="sumrow-val">${fmt(h.qty*h.price)}</span>
+      </div>
+    `).join('')+`<div class="sumrow total"><span class="sumrow-label">Portfolio Total</span><span class="sumrow-val gold">${fmt(total)}</span></div>`;
+  }
+}
+
+function addHolding(){
+  const name=document.getElementById('hold-name').value;
+  const full=document.getElementById('hold-full').value;
+  const qty=parseFloat(document.getElementById('hold-qty').value)||0;
+  const price=parseFloat(document.getElementById('hold-price').value)||0;
+  const type=document.getElementById('hold-type').value;
+  const icon=document.getElementById('hold-icon').value||'◈';
+  if(!name){toast('Enter ticker name');return;}
+  S.holdings.push({name,full,qty,price,type,icon,change:0});
+  saveState();closeModal('add-holding-modal');
+  renderHoldings();updateNWDisplay();initHoldingsChart();toast('Holding added ✓');
+}
+
+// ══════════════════════════════════════════════════
+// BILLS
+// ══════════════════════════════════════════════════
+function renderBills(){
+  const today=new Date().getDate();
+  const sortedBills=[...S.bills].sort((a,b)=>(a.due||31)-(b.due||31));
+  const upcomingEl=document.getElementById('upcoming-bills');
+  const fullEl=document.getElementById('bills-full');
+  const upcoming=sortedBills.filter(b=>!b.paid).slice(0,6);
+  const totalDue=upcoming.reduce((s,b)=>s+b.amt,0);
+  const dueLbl=document.getElementById('bills-due-total');
+  if(dueLbl)dueLbl.textContent=fmt(totalDue)+' due';
+
+  const billRow=(b,i)=>{
+    const today2=new Date().getDate();
+    const isLate=b.due>0&&b.due<today2&&!b.paid;
+    const dotColor=b.paid?'var(--green)':isLate?'var(--red)':'var(--orange)';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
+      <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;color:#fff">${b.name}</div>
+        <div style="display:flex;gap:10px;margin-top:2px;flex-wrap:wrap">
+          <span style="font-size:10px;color:rgba(255,255,255,0.4)">${b.due?'Due '+b.due+getDaySuffix(b.due):'Ongoing'}</span>
+          ${b.card?`<span style="font-size:10px;color:#A78BFA">💳 ${b.card}</span>`:''}
+          ${b.notes?`<span style="font-size:10px;color:rgba(255,255,255,0.25)">${b.notes}</span>`:''}
+        </div>
+      </div>
+      <div style="font-size:13px;font-weight:700;color:#fff;flex-shrink:0;margin-right:4px">$${b.amt}</div>
+      <button onclick="editBill(${i})" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0" title="Edit">✏️ Edit</button>
+      <button onclick="deleteBill(${i})" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#EF4444;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0" title="Delete">✕</button>
+      <div onclick="toggleBill(${i})" style="width:20px;height:20px;border-radius:50%;border:1.5px solid ${b.paid?'var(--green)':isLate?'var(--red)':'rgba(255,255,255,0.2)'};background:${b.paid?'rgba(34,197,94,0.15)':'transparent'};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:10px;color:var(--green)">${b.paid?'✓':''}</div>
+    </div>`;
+  };
+
+  if(upcomingEl) upcomingEl.innerHTML=upcoming.length?upcoming.map((b)=>billRow(b,S.bills.indexOf(b))).join(''):'<div style="font-size:11px;color:var(--green);padding:8px 0">✓ All bills paid!</div>';
+  if(fullEl) fullEl.innerHTML=sortedBills.map((b,i)=>billRow(b,i)).join('');
+}
+
+function getDaySuffix(d){return d===1||d===21||d===31?'st':d===2||d===22?'nd':d===3||d===23?'rd':'th';}
+
+function toggleBill(i){
+  S.bills[i].paid=!S.bills[i].paid;
+  saveState();renderBills();updateNWDisplay();
+}
+
+function saveBill(){
+  const name=document.getElementById('bill-name').value;
+  const amt=parseFloat(document.getElementById('bill-amt').value)||0;
+  const due=parseInt(document.getElementById('bill-due').value)||0;
+  const cat=document.getElementById('bill-cat').value;
+  const card=document.getElementById('bill-card').value;
+  const notes=document.getElementById('bill-notes').value;
+  if(!name){toast('Enter bill name');return;}
+  const editIdx=document.getElementById('bill-edit-idx').value;
+  const obj={id:'b'+Date.now(),name,amt,due,cat,card,notes,paid:false};
+  if(editIdx!==''){
+    const i=parseInt(editIdx);
+    obj.paid=S.bills[i].paid; // preserve paid status
+    S.bills[i]=obj;
+    toast('Bill updated ✓');
+  } else {
+    S.bills.push(obj);
+    toast('Bill added ✓');
+  }
+  saveState();closeModal('add-bill-modal');
+  document.getElementById('bill-edit-idx').value='';
+  document.getElementById('bill-modal-title').textContent='Add Bill';
+  renderBills();updateNWDisplay();
+}
+function addBill(){ // legacy alias
+  saveBill();
+}
+function editBill(i){
+  const b=S.bills[i];
+  document.getElementById('bill-modal-title').textContent='Edit Bill';
+  document.getElementById('bill-name').value=b.name||'';
+  document.getElementById('bill-amt').value=b.amt||0;
+  document.getElementById('bill-due').value=b.due||0;
+  document.getElementById('bill-cat').value=b.cat||'Other';
+  document.getElementById('bill-card').value=b.card||'';
+  document.getElementById('bill-notes').value=b.notes||'';
+  document.getElementById('bill-edit-idx').value=i;
+  openModal('add-bill-modal');
+}
+function deleteBill(i){
+  if(confirm('Delete this bill?')){
+    S.bills.splice(i,1);
+    saveState();renderBills();updateNWDisplay();toast('Bill deleted');
+  }
+}
+
+// ══════════════════════════════════════════════════
+// NET 30
+// ══════════════════════════════════════════════════
+function renderNet30(){
+  const el=document.getElementById('net30-list');
+  if(!el)return;
+  const outstanding=S.net30.filter(n=>n.status!=='paid');
+  const paid=S.net30.filter(n=>n.status==='paid');
+  const totalOut=outstanding.reduce((s,n)=>s+n.net30,0);
+  const totalDue=outstanding.reduce((s,n)=>s+n.net30,0);
+  const totalPaid=paid.reduce((s,n)=>s+n.net30,0);
+  const nTotal=document.getElementById('n30-total');
+  const nDue=document.getElementById('n30-due');
+  const nPaid=document.getElementById('n30-paid');
+  if(nTotal)nTotal.textContent=fmt(totalOut);
+  if(nDue)nDue.textContent=fmt(totalDue);
+  if(nPaid)nPaid.textContent=fmt(totalPaid);
+
+  el.innerHTML=S.net30.map((n,i)=>{
+    const today=new Date();
+    const due=new Date(n.due);
+    const daysLeft=Math.ceil((due-today)/(1000*60*60*24));
+    return `<div class="net30-row" onclick="toggleNet30(${i})">
+      <div class="n30-icon">${n.icon}</div>
+      <div style="flex:1">
+        <div class="n30-name">${n.client}</div>
+        <div class="n30-sub">${n.desc} · ${n.id||'NET-'+String(i+1).padStart(3,'0')}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:13px;font-weight:700;color:var(--gold)">$${n.net30}</div>
+        <div class="badge b-${n.status}">${n.status}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleNet30(i){
+  const s=S.net30[i].status;
+  S.net30[i].status=s==='paid'?'due':'paid';
+  saveState();renderNet30();updateNWDisplay();toast('Status updated');
+}
+
+function addNet30(){
+  const client=document.getElementById('n30-client').value;
+  const desc=document.getElementById('n30-desc').value;
+  const total=parseFloat(document.getElementById('n30-total-val').value)||0;
+  const net30=parseFloat(document.getElementById('n30-net-val').value)||0;
+  const date=document.getElementById('n30-date').value||new Date().toISOString().slice(0,10);
+  const icon=document.getElementById('n30-icon').value||'🏢';
+  if(!client){toast('Enter client name');return;}
+  const due=new Date(date);due.setDate(due.getDate()+30);
+  S.net30.push({client,desc,total,net30,date,due:due.toISOString().slice(0,10),status:'due',icon});
+  saveState();closeModal('add-n30-modal');renderNet30();updateNWDisplay();
+  toast('Invoice created ✓');
+}
+
+// ══════════════════════════════════════════════════
+// WISHLIST
+// ══════════════════════════════════════════════════
+function addWish(){
+  const url=document.getElementById('wish-url').value;
+  const name=document.getElementById('wish-name-input').value;
+  const price=parseFloat((document.getElementById('wish-price-input').value||'').replace(/[^0-9.]/g,''))||0;
+  const biz=document.getElementById('wish-biz').value;
+  if(!name){toast('Enter item name');return;}
+
+  // Detect emoji based on name keywords
+  const emoji=detectEmoji(name);
+  S.wishlist.push({name,url,price,biz,done:false,emoji});
+  saveState();renderWishlist('all');
+  document.getElementById('wish-url').value='';
+  document.getElementById('wish-name-input').value='';
+  document.getElementById('wish-price-input').value='';
+  document.getElementById('wish-preview').style.display='none';
+  toast('Added to wishlist ✓');
+}
+
+function detectEmoji(name){
+  const n=name.toLowerCase();
+  if(n.includes('printer')||n.includes('print'))return'🖨️';
+  if(n.includes('camera')||n.includes('cam'))return'📷';
+  if(n.includes('light'))return'💡';
+  if(n.includes('mic')||n.includes('audio'))return'🎙️';
+  if(n.includes('screen')||n.includes('monitor'))return'🖥️';
+  if(n.includes('shirt')||n.includes('apparel'))return'👕';
+  if(n.includes('kit'))return'📦';
+  if(n.includes('fire')||n.includes('outdoor'))return'🔥';
+  if(n.includes('scale'))return'⚖️';
+  if(n.includes('cricut'))return'✂️';
+  return'🛒';
+}
+
+function previewLink(){
+  const url=document.getElementById('wish-url').value;
+  if(!url||!url.startsWith('http'))return;
+  const prev=document.getElementById('wish-preview');
+  const content=document.getElementById('wish-preview-content');
+  // Extract domain for display
+  try{
+    const domain=new URL(url).hostname.replace('www.','');
+    content.innerHTML=`<div style="font-size:12px;color:var(--t1)">Link from: <strong>${domain}</strong></div><div style="font-size:10px;color:var(--t2);margin-top:2px;word-break:break-all">${url.slice(0,80)}${url.length>80?'...':''}</div>`;
+    prev.style.display='block';
+    // Auto-fill name if blank
+    const nameEl=document.getElementById('wish-name-input');
+    if(!nameEl.value) nameEl.focus();
+  }catch(e){}
+}
+
+function filterWish(biz){
+  renderWishlist(biz);
+}
+
+function renderWishlist(biz='all'){
+  const el=document.getElementById('wish-list');
+  if(!el)return;
+  let items=biz==='all'?S.wishlist:S.wishlist.filter(w=>w.biz===biz);
+  const totalVal=items.reduce((s,w)=>s+w.price,0);
+  const done=items.filter(w=>w.done).length;
+  el.innerHTML=`<div style="font-size:11px;color:var(--t2);margin-bottom:10px">${items.length} items · ${fmt(totalVal)} total · ${done} checked off</div>`+
+  (items.length?items.map((w,fullIdx)=>{
+    const i=S.wishlist.indexOf(w);
+    return `<div class="wish-item">
+      <div class="wish-img">${w.emoji||'🛒'}</div>
+      <div style="flex:1;min-width:0">
+        <div class="wish-name" style="${w.done?'text-decoration:line-through;opacity:.5':''}">${w.name}</div>
+        ${w.url?`<div class="wish-link" onclick="window.open('${w.url}','_blank')" title="${w.url}">${new URL(w.url).hostname.replace('www.','')}</div>`:''}
+        <div style="font-size:9px;color:var(--t3);margin-top:2px">${(w.biz||'ampm').toUpperCase()}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="wish-price">${w.price?fmt(w.price):''}</div>
+        <div class="wish-check ${w.done?'done':''}" onclick="toggleWish(${i})">✓</div>
+        <div class="wish-check" style="color:var(--red);border-color:rgba(239,68,68,0.3)" onclick="removeWish(${i})">✕</div>
+      </div>
+    </div>`;
+  }).join(''):'<div style="text-align:center;color:var(--t3);padding:24px">No items yet — paste a link above</div>');
+}
+
+function toggleWish(i){S.wishlist[i].done=!S.wishlist[i].done;saveState();renderWishlist('all');}
+function removeWish(i){S.wishlist.splice(i,1);saveState();renderWishlist('all');}
+
+// ══════════════════════════════════════════════════
+// T-SHIRT INVENTORY
+// ══════════════════════════════════════════════════
+async function connectInventory(){
+  const url=document.getElementById('sheets-url').value.trim();
+  if(!url){toast('Paste your Google Apps Script URL');return;}
+  S.sheetsUrl=url;
+  saveState();
+  await syncInventory();
+}
+
+async function syncInventory(){
+  const url=S.sheetsUrl;
+  if(!url){toast('Not connected — paste URL first');return;}
+  document.getElementById('inv-status').textContent='Syncing...';
+  try{
+    const resp=await fetch(url+'?action=read');
+    const data=await resp.json();
+    if(data.rows){
+      S.inventory=data.rows;
+      saveState();
+      renderInventoryTable();
+      updateNWDisplay();
+      document.getElementById('inv-status').textContent='✓ Synced from Google Sheets — '+new Date().toLocaleTimeString();
+      toast('Inventory synced ✓');
+    }
+  }catch(e){
+    document.getElementById('inv-status').textContent='⚠ Sync failed — check your URL';
+    toast('Sync failed — check URL');
+  }
+}
+
+function loadSampleInventory(){
+  S.inventory=[
+    {brand:'Gildan G5000',color:'Black',size:'S',qty:24,lowStock:5},
+    {brand:'Gildan G5000',color:'Black',size:'M',qty:36,lowStock:5},
+    {brand:'Gildan G5000',color:'Black',size:'L',qty:48,lowStock:5},
+    {brand:'Gildan G5000',color:'Black',size:'XL',qty:30,lowStock:5},
+    {brand:'Gildan G5000',color:'White',size:'M',qty:20,lowStock:5},
+    {brand:'Gildan G5000',color:'White',size:'L',qty:25,lowStock:5},
+    {brand:'Bella Canvas 3001C',color:'Black',size:'S',qty:12,lowStock:3},
+    {brand:'Bella Canvas 3001C',color:'Black',size:'M',qty:18,lowStock:3},
+    {brand:'Bella Canvas 3001C',color:'Black',size:'L',qty:15,lowStock:3},
+    {brand:'Bella Canvas 3001C',color:'Navy',size:'M',qty:10,lowStock:3},
+    {brand:'Bella Canvas 3001C',color:'White',size:'L',qty:8,lowStock:3},
+  ];
+  saveState();renderInventoryTable();updateNWDisplay();
+  document.getElementById('inv-status').textContent='✓ Loaded sample data';
+  toast('Sample inventory loaded ✓');
+}
+
+function renderInventoryTable(){
+  const tbody=document.getElementById('inv-table-body');
+  if(!tbody)return;
+  let gildan=0,bella=0,total=0,value=0;
+  S.inventory.forEach(r=>{
+    const isBella=r.brand.toLowerCase().includes('bella');
+    const price=isBella?3.0:2.5;
+    const v=r.qty*price;
+    if(isBella)bella+=r.qty; else gildan+=r.qty;
+    total+=r.qty;value+=v;
+  });
+  document.getElementById('inv-total-shirts').textContent=total.toLocaleString();
+  document.getElementById('inv-total-value').textContent=fmt(value);
+  document.getElementById('inv-gildan').textContent=gildan+' shirts';
+  document.getElementById('inv-bella').textContent=bella+' shirts';
+  if(S.inventory.length===0){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--t3);padding:20px">No inventory loaded</td></tr>';return;}
+  tbody.innerHTML=S.inventory.map((r,i)=>{
+    const isBella=r.brand.toLowerCase().includes('bella');
+    const price=isBella?3.0:2.5;
+    const v=r.qty*price;
+    const lowAlert=r.qty<=r.lowStock;
+    return `<tr>
+      <td style="font-weight:600">${r.brand}</td>
+      <td>${r.color}</td>
+      <td><span style="background:var(--card2);padding:2px 7px;border-radius:4px;font-size:10px">${r.size}</span></td>
+      <td style="color:${lowAlert?'var(--red)':'var(--t1)'}${lowAlert?' ;font-weight:700':''}">${r.qty}${lowAlert?' ⚠':''}
+        <button onclick="adjustQty(${i},-1)" style="background:var(--card2);border:none;color:var(--t2);border-radius:4px;padding:1px 5px;cursor:pointer;margin-left:6px">−</button>
+        <button onclick="adjustQty(${i},1)" style="background:var(--card2);border:none;color:var(--t2);border-radius:4px;padding:1px 5px;cursor:pointer">+</button>
+      </td>
+      <td style="color:var(--t2)">${r.lowStock}</td>
+      <td style="color:var(--gold);font-weight:600">${fmt(v)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function adjustQty(i,delta){
+  S.inventory[i].qty=Math.max(0,(S.inventory[i].qty||0)+delta);
+  saveState();renderInventoryTable();updateNWDisplay();
+}
+
+function addShirtManual(){
+  const brand=document.getElementById('shirt-brand').value;
+  const color=document.getElementById('shirt-color').value||'Black';
+  const size=document.getElementById('shirt-size').value;
+  const qty=parseInt(document.getElementById('shirt-qty').value)||1;
+  S.inventory.push({brand,color,size,qty,lowStock:3});
+  saveState();closeModal('add-shirt-modal');renderInventoryTable();updateNWDisplay();
+  toast('Shirts added ✓');
+}
+
+// ══════════════════════════════════════════════════
+// BUSINESS TABS VIEW BUILDER
+// ══════════════════════════════════════════════════
+const bizConfigs={
+  ampm_all:{name:'AMPM Advance',color:'var(--gold)',dot:'gold',desc:'All businesses combined',incomeTag:'ampm'},
+  ampm_print:{name:'AMPM Print & Apparel',color:'#A78BFA',dot:'violet',desc:'Cricut, heat press, t-shirts, custom apparel',incomeTag:'ampm'},
+  byop:{name:'BYOP Vibes',color:'var(--gold)',dot:'gold',desc:'Luxury custom party kits · byopvibes.com',incomeTag:'byop'},
+  nifty:{name:'Nifty Thrifty',color:'var(--teal)',dot:'teal',desc:'Retail arbitrage + referral network',incomeTag:'nifty'},
+  cypher:{name:'Cypher the Culture',color:'var(--rose)',dot:'rose',desc:'Hip-hop culture platform · cyphertheculture.com',incomeTag:'cypher'},
+  ampm_design:{name:'AMPM Design Services',color:'#60A5FA',dot:'blue',desc:'Graphic design, web design, brand strategy',incomeTag:'ampm'},
+};
+
+function renderBizView(id){
+  const cfg=bizConfigs[id];
+  if(!cfg)return;
+  const el=document.getElementById('biz-view-'+id);
+  if(!el)return;
+  const txs=S.transactions.filter(t=>id==='ampm_all'?true:t.biz===cfg.incomeTag).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const income=txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
+  const expense=txs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+  const net=income-expense;
+  const thisMo=new Date().toISOString().slice(0,7);
+  const moIncome=txs.filter(t=>t.type==='income'&&t.date.slice(0,7)===thisMo).reduce((s,t)=>s+t.amt,0);
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:10px;height:10px;border-radius:50%;background:${cfg.color}"></div>
+        <div><div style="font-size:18px;font-weight:800">${cfg.name}</div><div style="font-size:11px;color:var(--t2)">${cfg.desc}</div></div>
+      </div>
+      <button class="btn-sm btn-gold" onclick="prefillTxBiz('${cfg.incomeTag}')">+ Transaction</button>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi" style="--bar-color:var(--green)"><div class="kpi-l">All-Time Income</div><div class="kpi-v">${fmt(income)}</div></div>
+      <div class="kpi" style="--bar-color:var(--gold)"><div class="kpi-l">This Month</div><div class="kpi-v" style="color:var(--gold)">${fmt(moIncome)}</div></div>
+      <div class="kpi" style="--bar-color:var(--red)"><div class="kpi-l">All-Time Expenses</div><div class="kpi-v">${fmt(expense)}</div></div>
+      <div class="kpi" style="--bar-color:${cfg.color}"><div class="kpi-l">Net</div><div class="kpi-v" style="color:${net>=0?'var(--green)':'var(--red)'}">${fmt(net)}</div></div>
+    </div>
+    <div class="card">
+      <div class="c-head">
+        <div class="c-title">Transaction History</div>
+        <button class="btn-sm btn-ghost" onclick="prefillTxBiz('${cfg.incomeTag}')">+ Add</button>
+      </div>
+      ${txs.length?txs.map((t,ti)=>`
+        <div class="tx-item">
+          <div class="tx-icon">${t.icon||'💰'}</div>
+          <div style="flex:1"><div class="tx-desc">${t.desc}</div><div class="tx-date">${new Date(t.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div></div>
+          <div class="tx-amt ${t.type==='income'?'in':'out'}">${t.type==='income'?'+':'-'}${fmt(t.amt)}</div>
+          <button onclick="deleteTx('${t.desc}','${t.date}')" style="background:transparent;border:none;color:var(--red);cursor:pointer;font-size:11px;opacity:0.4;padding:2px 4px" title="Delete">✕</button>
+        </div>
+      `).join(''):'<div style="color:var(--t3);text-align:center;padding:20px;font-size:12px">No transactions yet — click + Transaction to add your first</div>'}
+    </div>
+  `;
+}
+function prefillTxBiz(biz){
+  document.getElementById('tx-biz').value=biz;
+  document.getElementById('tx-date').value=new Date().toISOString().slice(0,10);
+  document.getElementById('tx-desc').value='';
+  document.getElementById('tx-amt').value='';
+  openModal('add-tx-modal');
+}
+function deleteTx(desc,date){
+  const idx=S.transactions.findIndex(t=>t.desc===desc&&t.date===date);
+  if(idx>=0&&confirm('Delete this transaction?')){
+    S.transactions.splice(idx,1);
+    saveState();renderRecentTx();renderAllTx();updateNWDisplay();renderCalendar();
+    toast('Transaction deleted');
+  }
+}
+
+// ══════════════════════════════════════════════════
+// NAV & ROUTING
+// ══════════════════════════════════════════════════
+function nav(el,id){
+  document.querySelectorAll('.sb-item').forEach(s=>s.classList.remove('active'));
+  el.classList.add('active');
+  showView(id);
+}
+
+function bizTab(el,id){
+  document.querySelectorAll('.biz-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  try{ el.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); }catch(e){}
+  showView(id);
+  if(bizConfigs[id]) renderBizView(id);
+  closeSidebarOnMobile();
+}
+
+function showView(id){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  const v=document.getElementById('view-'+id);
+  if(v){v.classList.add('active');}
+  if(id==='transactions')renderAllTx();
+  if(id==='bills'){renderBills();renderNet30();}
+  if(id==='holdings'){renderHoldings();setTimeout(initHoldingsChart,100);}
+  if(id==='inventory')renderInventoryTable();
+  if(id==='wishlist')renderWishlist('all');
+  // BYOP — always re-render on tab visit
+  if(id==='byop'){
+    try{renderBizView('byop');}catch(e){}
+    setTimeout(()=>{
+      try{renderByopKits();}catch(e){}
+      try{renderByopKitKPIs();}catch(e){}
+    },50);
+  }
+  if(id==='nifty'){
+    try{renderBizView('nifty');}catch(e){}
+    try{renderNiftySalesLog();}catch(e){}
+  }
+  if(id==='ampm_print'){
+    try{renderBizView('ampm_print');}catch(e){}
+    try{renderPrintEquipment();}catch(e){}
+  }
+}
+
+// ══════════════════════════════════════════════════
+// MODALS
+// ══════════════════════════════════════════════════
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.modal-overlay').forEach(m=>{
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');});
+});
+
+// ══════════════════════════════════════════════════
+// TOAST
+// ══════════════════════════════════════════════════
+let toastTimer;
+function toast(msg){
+  const t=document.getElementById('toast');
+  document.getElementById('toast-msg').textContent=msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+// ══════════════════════════════════════════════════
+// TIME FILTER (CHART)
+// ══════════════════════════════════════════════════
+function setTime(el, period){
+  document.querySelectorAll('.tb').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  // Re-render chart with filtered data
+  initNWChart();
+}
+
+// ══════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════
+function init(){
+  // Greetings & date
+  const now=new Date();
+  const h=now.getHours();
+  const greeting=h<12?'Good morning':h<17?'Good afternoon':'Good evening';
+  document.getElementById('greeting').textContent=greeting+', Rashad';
+  document.getElementById('tb-date').textContent=now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+
+  // Set today's date on date inputs
+  const dateStr=now.toISOString().slice(0,10);
+  document.querySelectorAll('input[type="date"]').forEach(i=>i.value=i.value||dateStr);
+
+  // Render all
+  const cashEl=document.getElementById('cash-display');
+  if(cashEl) cashEl.textContent=fmt(S.cash||6000);
+  updateNWDisplay();
+  renderCalendar();
+  renderRecentTx();
+  renderHoldings();
+  renderBills();
+  renderNet30();
+  renderInventoryTable();
+  renderWishlist('all');
+
+  setTimeout(()=>{
+    initNWChart();
+    initMixChart();
+  }, 100);
+}
+
+init();
+</script>
+
+<script>
+function byopSyncNow(){
+  var btn = document.getElementById('byop-sync-btn');
+  var status = document.getElementById('byop-sync-status');
+  var raw = (document.getElementById('byop-paste-area').value || '').trim();
+
+  if(!raw){
+    if(status){ status.style.display='block'; status.style.color='#EF4444'; status.textContent='Paste your data first'; }
+    return;
+  }
+
+  if(btn){ btn.textContent='Syncing...'; }
+
+  var parsed;
+  try{ parsed = JSON.parse(raw); }
+  catch(e){
+    if(status){ status.style.display='block'; status.style.color='#EF4444'; status.textContent='Invalid JSON — use the Copy button in BYOP app'; }
+    if(btn){ btn.textContent='↻ SYNC NOW'; }
+    return;
+  }
+
+  if(!parsed.kits && !parsed.supplies){
+    if(status){ status.style.display='block'; status.style.color='#EF4444'; status.textContent='No kit or supply data found'; }
+    if(btn){ btn.textContent='↻ SYNC NOW'; }
+    return;
+  }
+
+  try{
+    if(typeof BS !== 'undefined'){
+      if(parsed.kits) BS.kits = parsed.kits;
+      if(parsed.supplies) BS.supplies = parsed.supplies;
+      if(parsed.assemblies) BS.assemblies = parsed.assemblies;
+      localStorage.setItem('byop_dash_v1', JSON.stringify(BS));
+    }
+  }catch(e){}
+
+  try{ renderByopKits(); }catch(e){}
+  try{ renderByopKitKPIs(); }catch(e){}
+  try{ renderByopSupplies(); }catch(e){}
+  try{ updateNWDisplay(); }catch(e){}
+
+  var kc = (parsed.kits||[]).length;
+  var sc = (parsed.supplies||[]).length;
+  document.getElementById('byop-paste-area').value = '';
+  if(status){
+    status.style.display='block';
+    status.style.color='#22C55E';
+    status.textContent='Done! '+kc+' kits + '+sc+' supplies synced.';
+  }
+  if(btn){ btn.textContent='✓ Synced!'; }
+  setTimeout(function(){
+    var panel = document.getElementById('byop-sync-panel');
+    if(panel) panel.style.display='none';
+    if(status) status.style.display='none';
+    if(btn) btn.textContent='↻ SYNC NOW';
+  }, 3000);
+}
+
+function byopExportNow(){
+  var area = document.getElementById('byop-export-area');
+  var btn = document.getElementById('byop-export-btn');
+  var data = '{}';
+  try{ data = JSON.stringify(typeof BS!=='undefined'?BS:{},null,2); }catch(e){}
+  if(area){ area.style.display='block'; area.value=data; area.select(); }
+  try{
+    navigator.clipboard.writeText(data).then(function(){
+      if(btn){ btn.textContent='✓ Copied!'; setTimeout(function(){ btn.textContent='📤 Export'; },2000); }
+    });
+  }catch(e){
+    try{ document.execCommand('copy'); }catch(e2){}
+    if(btn){ btn.textContent='✓ Copied!'; setTimeout(function(){ btn.textContent='📤 Export'; },2000); }
+  }
+}
+
+function toggleByopSyncPanel(){
+  var p = document.getElementById('byop-sync-panel');
+  if(!p) return;
+  p.style.display = (p.style.display==='block') ? 'none' : 'block';
+}
+
+function editBill(i){
+  var b = S.bills[i];
+  if(!b) return;
+  document.getElementById('bill-modal-title').textContent = 'Edit Bill';
+  document.getElementById('bill-name').value = b.name || '';
+  document.getElementById('bill-amt').value = b.amt || 0;
+  document.getElementById('bill-due').value = b.due || 0;
+  document.getElementById('bill-cat').value = b.cat || 'Other';
+  document.getElementById('bill-card').value = b.card || '';
+  document.getElementById('bill-notes').value = b.notes || '';
+  document.getElementById('bill-edit-idx').value = i;
+  openModal('add-bill-modal');
+}
+
+function deleteBill(i){
+  if(confirm('Delete "' + S.bills[i].name + '"?')){
+    S.bills.splice(i, 1);
+    saveState();
+    renderBills();
+    updateNWDisplay();
+    toast('Bill deleted');
+  }
+}
+
+function saveBill(){
+  var name = document.getElementById('bill-name').value.trim();
+  var amt = parseFloat(document.getElementById('bill-amt').value) || 0;
+  var due = parseInt(document.getElementById('bill-due').value) || 0;
+  var cat = document.getElementById('bill-cat').value;
+  var card = document.getElementById('bill-card').value.trim();
+  var notes = document.getElementById('bill-notes').value.trim();
+  var editIdx = document.getElementById('bill-edit-idx').value;
+  if(!name){ toast('Enter a name'); return; }
+  var obj = {id: 'b'+Date.now(), name:name, amt:amt, due:due, cat:cat, card:card, notes:notes, paid:false};
+  if(editIdx !== ''){
+    var i = parseInt(editIdx);
+    obj.paid = S.bills[i] ? S.bills[i].paid : false;
+    S.bills[i] = obj;
+    toast('Bill updated ✓');
+  } else {
+    S.bills.push(obj);
+    toast('Bill added ✓');
+  }
+  document.getElementById('bill-edit-idx').value = '';
+  document.getElementById('bill-modal-title').textContent = 'Add Bill';
+  saveState();
+  closeModal('add-bill-modal');
+  renderBills();
+  updateNWDisplay();
+}
+
+</script>
+
+</body>
+</html>
