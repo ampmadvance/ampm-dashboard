@@ -1778,22 +1778,45 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
       <div class="c-head">
         <div class="c-title">Add Item to Wishlist</div>
       </div>
-      <div class="form-row">
-        <div class="form-group" style="flex:2">
-          <label class="form-label">Paste Link</label>
-          <input id="wish-url" placeholder="https://amazon.com/..." onpaste="setTimeout(()=>previewLink(),100)">
+      <!-- URL row + live preview -->
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div style="flex:2;min-width:200px">
+          <label class="form-label">Paste Product Link</label>
+          <input id="wish-url" placeholder="https://amazon.com/..." oninput="clearWishPreview()" onpaste="setTimeout(wishFetchPreview,150)" style="width:100%">
         </div>
-        <div class="form-group">
+        <button class="btn-sm btn-ghost" onclick="wishFetchPreview()" style="height:35px;white-space:nowrap;flex-shrink:0">🔍 Fetch Preview</button>
+      </div>
+
+      <!-- Live preview card -->
+      <div id="wish-preview-card" style="display:none;background:var(--card2);border:1px solid rgba(201,168,76,0.2);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div id="wish-preview-img-wrap" style="width:64px;height:64px;border-radius:8px;overflow:hidden;background:var(--card);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:28px">🛒</div>
+          <div style="flex:1;min-width:0">
+            <div id="wish-preview-title" style="font-size:13px;font-weight:600;color:#fff;margin-bottom:3px"></div>
+            <div id="wish-preview-domain" style="font-size:10px;color:var(--gold)"></div>
+          </div>
+          <div style="font-size:10px;color:var(--green);font-weight:700;flex-shrink:0">✓ Preview loaded</div>
+        </div>
+      </div>
+      <div id="wish-preview-loading" style="display:none;font-size:11px;color:var(--gold);padding:6px 0">⟳ Fetching preview...</div>
+
+      <!-- Fields row -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <div style="flex:2;min-width:160px">
           <label class="form-label">Item Name</label>
-          <input id="wish-name-input" placeholder="e.g. DTG Printer">
+          <input id="wish-name-input" placeholder="e.g. Neon Sign" style="width:100%">
         </div>
-        <div class="form-group">
-          <label class="form-label">Price</label>
-          <input id="wish-price-input" placeholder="$0">
+        <div style="flex:1;min-width:100px">
+          <label class="form-label">Price ($)</label>
+          <input id="wish-price-input" placeholder="0.00" style="width:100%">
         </div>
-        <div class="form-group">
+        <div style="flex:0 0 80px">
+          <label class="form-label">Qty</label>
+          <input id="wish-qty-input" type="number" placeholder="1" min="1" value="1" style="width:100%">
+        </div>
+        <div style="flex:1;min-width:120px">
           <label class="form-label">Business</label>
-          <select id="wish-biz">
+          <select id="wish-biz" style="width:100%">
             <option value="ampm">AMPM</option>
             <option value="byop">BYOP Vibes</option>
             <option value="nifty">Nifty Thrifty</option>
@@ -1801,12 +1824,12 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
             <option value="personal">Personal</option>
           </select>
         </div>
+        <div style="flex:1;min-width:140px">
+          <label class="form-label">Image URL (optional)</label>
+          <input id="wish-img-input" placeholder="Auto-filled or paste" style="width:100%">
+        </div>
       </div>
-      <div id="wish-preview" style="display:none;background:var(--card2);border-radius:var(--r);padding:10px;margin-bottom:10px">
-        <div style="font-size:10px;color:var(--gold);margin-bottom:4px">Link Preview</div>
-        <div id="wish-preview-content"></div>
-      </div>
-      <button class="btn-sm btn-gold" onclick="addWish()" style="padding:8px 18px">+ Add to Wishlist</button>
+      <button class="btn-sm btn-gold" onclick="addWish()" style="padding:9px 22px;font-size:13px">+ Add to Wishlist</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <button class="btn-sm btn-ghost" onclick="filterWish('all')">All</button>
@@ -2943,20 +2966,22 @@ function addNet30(){
 // WISHLIST
 // ══════════════════════════════════════════════════
 function addWish(){
-  const url=document.getElementById('wish-url').value;
-  const name=document.getElementById('wish-name-input').value;
+  const url=(document.getElementById('wish-url').value||'').trim();
+  const name=(document.getElementById('wish-name-input').value||'').trim();
   const price=parseFloat((document.getElementById('wish-price-input').value||'').replace(/[^0-9.]/g,''))||0;
   const biz=document.getElementById('wish-biz').value;
+  const imgUrl=(document.getElementById('wish-img-input').value||'').trim();
+  const qty=parseInt(document.getElementById('wish-qty-input').value)||1;
   if(!name){toast('Enter item name');return;}
-
-  // Detect emoji based on name keywords
   const emoji=detectEmoji(name);
-  S.wishlist.push({name,url,price,biz,done:false,emoji});
+  S.wishlist.push({name,url,price,qty,biz,done:false,emoji,imgUrl});
   saveState();renderWishlist('all');
-  document.getElementById('wish-url').value='';
-  document.getElementById('wish-name-input').value='';
-  document.getElementById('wish-price-input').value='';
-  document.getElementById('wish-preview').style.display='none';
+  // Clear form
+  ['wish-url','wish-name-input','wish-price-input','wish-img-input'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value=''; const qe=document.getElementById('wish-qty-input');if(qe)qe.value='1';
+  });
+  const pc=document.getElementById('wish-preview-card');
+  if(pc)pc.style.display='none';
   toast('Added to wishlist ✓');
 }
 
@@ -2999,25 +3024,40 @@ function renderWishlist(biz='all'){
   const el=document.getElementById('wish-list');
   if(!el)return;
   let items=biz==='all'?S.wishlist:S.wishlist.filter(w=>w.biz===biz);
-  const totalVal=items.reduce((s,w)=>s+w.price,0);
+  const totalVal=items.reduce((s,w)=>s+(w.price||0)*(w.qty||1),0);
   const done=items.filter(w=>w.done).length;
-  el.innerHTML=`<div style="font-size:11px;color:var(--t2);margin-bottom:10px">${items.length} items · ${fmt(totalVal)} total · ${done} checked off</div>`+
-  (items.length?items.map((w,fullIdx)=>{
+
+  el.innerHTML=`<div style="font-size:11px;color:var(--t2);margin-bottom:12px">${items.length} items · ${fmt(totalVal)} total · ${done} checked off</div>`+
+  (items.length?items.map(w=>{
     const i=S.wishlist.indexOf(w);
-    return `<div class="wish-item">
-      <div class="wish-img">${w.emoji||'🛒'}</div>
+    let domain='';
+    try{if(w.url)domain=new URL(w.url).hostname.replace('www.','');}catch(e){}
+    const imgEl = w.imgUrl
+      ? `<img src="${w.imgUrl}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,0.08);display:block" onerror="this.outerHTML='<div style=\"width:60px;height:60px;border-radius:8px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:24px\">${w.emoji||'🛒'}</div>'">`
+      : `<div style="width:60px;height:60px;border-radius:8px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:24px;border:1px solid rgba(255,255,255,0.07);flex-shrink:0">${w.emoji||'🛒'}</div>`;
+    return `<div class="wish-item" style="gap:12px;padding:12px;margin-bottom:8px;${w.done?'opacity:0.5':''}">
+      <div style="flex-shrink:0">${imgEl}</div>
       <div style="flex:1;min-width:0">
-        <div class="wish-name" style="${w.done?'text-decoration:line-through;opacity:.5':''}">${w.name}</div>
-        ${w.url?`<div class="wish-link" onclick="window.open('${w.url}','_blank')" title="${w.url}">${new URL(w.url).hostname.replace('www.','')}</div>`:''}
-        <div style="font-size:9px;color:var(--t3);margin-top:2px">${(w.biz||'ampm').toUpperCase()}</div>
+        <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:3px;${w.done?'text-decoration:line-through':''}">${w.name}</div>
+        ${domain?`<div style="font-size:10px;color:var(--gold);cursor:pointer;margin-bottom:2px" onclick="window.open('${w.url}','_blank')">↗ ${domain}</div>`:''}
+        <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+          ${(w.qty&&w.qty>1)?`<span style="background:rgba(201,168,76,0.15);color:var(--gold);border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700">×${w.qty}</span>`:''}
+          <div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.06em">${(w.biz||'ampm')}</div>
+        </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="wish-price">${w.price?fmt(w.price):''}</div>
-        <div class="wish-check ${w.done?'done':''}" onclick="toggleWish(${i})">✓</div>
-        <div class="wish-check" style="color:var(--red);border-color:rgba(239,68,68,0.3)" onclick="removeWish(${i})">✕</div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0">
+        <div style="text-align:right">
+          ${(w.qty&&w.qty>1)?`<div style="font-size:10px;color:var(--t2);margin-bottom:2px">×${w.qty} = <span style='color:var(--gold);font-weight:700'>${fmt((w.price||0)*w.qty)}</span></div>`:''}
+          <div style="font-size:15px;font-weight:800;color:var(--gold)">${w.price?fmt(w.price):''}</div>
+          ${(w.qty&&w.qty>1)?'':`<div style='font-size:9px;color:var(--t3)'>each</div>`}
+        </div>
+        <div style="display:flex;gap:6px">
+          <button onclick="toggleWish(${i})" style="width:26px;height:26px;border-radius:50%;border:1.5px solid ${w.done?'var(--green)':'rgba(255,255,255,0.2)'};background:${w.done?'rgba(34,197,94,0.15)':'transparent'};color:var(--green);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center">${w.done?'✓':''}</button>
+          <button onclick="removeWish(${i})" style="width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(239,68,68,0.25);background:transparent;color:var(--red);cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center">✕</button>
+        </div>
       </div>
     </div>`;
-  }).join(''):'<div style="text-align:center;color:var(--t3);padding:24px">No items yet — paste a link above</div>');
+  }).join(''):`<div style="text-align:center;color:var(--t3);padding:32px;font-size:12px">No items yet — paste a link above and click Fetch Preview</div>`);
 }
 
 function toggleWish(i){S.wishlist[i].done=!S.wishlist[i].done;saveState();renderWishlist('all');}
@@ -3438,5 +3478,70 @@ function saveBill(){
 
 </script>
 
+<script>
+/* ── WISHLIST IMAGE PREVIEW via Microlink API ── */
+var _wishPreviewData = {};
+
+function clearWishPreview(){
+  var card = document.getElementById('wish-preview-card');
+  if(card) card.style.display='none';
+  _wishPreviewData = {};
+}
+
+function wishFetchPreview(){
+  var urlEl = document.getElementById('wish-url');
+  var url = urlEl ? urlEl.value.trim() : '';
+  if(!url || !url.startsWith('http')){ toast('Paste a valid link first'); return; }
+
+  var loading = document.getElementById('wish-preview-loading');
+  var card = document.getElementById('wish-preview-card');
+  if(loading) loading.style.display='block';
+  if(card) card.style.display='none';
+
+  // Use microlink.io — free, no API key, pulls og:image + title
+  fetch('https://api.microlink.io/?url=' + encodeURIComponent(url) + '&screenshot=false&meta=true')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(loading) loading.style.display='none';
+      if(data.status !== 'success' && data.status !== 'partial'){ toast('Could not fetch preview — fill in manually'); return; }
+
+      var d = data.data || {};
+      var title = d.title || d.description || '';
+      var imgUrl = (d.image && d.image.url) ? d.image.url : '';
+      var domain = '';
+      try{ domain = new URL(url).hostname.replace('www.',''); }catch(e){}
+
+      // Store for addWish to use
+      _wishPreviewData = {title:title, imgUrl:imgUrl, domain:domain};
+
+      // Auto-fill name if empty
+      var nameEl = document.getElementById('wish-name-input');
+      if(nameEl && !nameEl.value && title) nameEl.value = title.slice(0,60);
+
+      // Auto-fill img if empty
+      var imgEl = document.getElementById('wish-img-input');
+      if(imgEl && !imgEl.value && imgUrl) imgEl.value = imgUrl;
+
+      // Show preview card
+      if(card){
+        card.style.display='block';
+        var imgWrap = document.getElementById('wish-preview-img-wrap');
+        var titleEl = document.getElementById('wish-preview-title');
+        var domainEl = document.getElementById('wish-preview-domain');
+
+        if(imgWrap && imgUrl){
+          imgWrap.innerHTML = '<img src="'+imgUrl+'" style="width:64px;height:64px;object-fit:cover;border-radius:8px" onerror="this.parentElement.innerHTML='🛒'">';
+        }
+        if(titleEl) titleEl.textContent = title.slice(0,80) || url.slice(0,60);
+        if(domainEl) domainEl.textContent = '↗ ' + domain;
+      }
+    })
+    .catch(function(e){
+      if(loading) loading.style.display='none';
+      toast('Preview failed — you can still add manually');
+    });
+}
+
+</script>
 </body>
 </html>
