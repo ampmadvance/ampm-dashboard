@@ -1697,6 +1697,14 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
   <!-- ════ TRANSACTIONS ════ -->
   <div class="view" id="view-transactions">
+    <!-- Entity income tracker -->
+    <div class="card" style="margin-bottom:14px" id="entity-tracker-card">
+      <div class="c-head">
+        <div class="c-title">Income by Company / Entity</div>
+        <span style="font-size:10px;color:var(--t2)">Monthly recurring forecast</span>
+      </div>
+      <div id="entity-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
     <div class="card" style="margin-bottom:14px">
       <div class="c-head">
         <div class="c-title">All Transactions</div>
@@ -2106,7 +2114,10 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
       <div class="form-group"><label class="form-label">Business</label><select id="tx-biz"><option value="ampm">AMPM</option><option value="byop">BYOP Vibes</option><option value="nifty">Nifty Thrifty</option><option value="cypher">Cypher</option><option value="personal">Personal</option></select></div>
       <div class="form-group"><label class="form-label">Date</label><input id="tx-date" type="date"></div>
     </div>
-    <div class="form-group"><label class="form-label">Icon (emoji)</label><input id="tx-icon" placeholder="💰" maxlength="2" value="💰"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Company / Entity</label><input id="tx-entity" placeholder="e.g. Qmee Research, Energizer LLC"></div>
+      <div class="form-group"><label class="form-label">Icon (emoji)</label><input id="tx-icon" placeholder="💰" maxlength="2" value="💰"></div>
+    </div>
     <button class="btn-sm btn-gold" style="width:100%;padding:11px" onclick="addTransaction()">Add Transaction</button>
   </div>
 </div>
@@ -2483,6 +2494,22 @@ function updateNWDisplay(){
     chgEl.className='nw-change '+(diff>0?'up':'down');
   }
 
+  // Live KPI tiles
+  const thisMonthStr = new Date().toISOString().slice(0,7);
+  const thisMonthIncome = S.transactions
+    .filter(t=>t.type==='income'&&t.date&&t.date.slice(0,7)===thisMonthStr)
+    .reduce((s,t)=>s+t.amt,0);
+  const thisMonthLabel = new Date().toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  const billsTotal = S.bills.reduce((s,b)=>s+b.amt,0);
+  const kiEl=document.getElementById('kpi-month-income');
+  if(kiEl)kiEl.textContent=fmt(thisMonthIncome);
+  const klEl=document.getElementById('kpi-month-label');
+  if(klEl)klEl.textContent=thisMonthLabel;
+  const btEl=document.getElementById('kpi-bills-total');
+  if(btEl)btEl.textContent=fmt(billsTotal);
+  const cdEl=document.getElementById('cash-display');
+  if(cdEl)cdEl.textContent=fmt(S.cash||0);
+
   // Update nwHistory
   const today = new Date().toISOString().slice(0,10);
   const last = S.nwHistory[S.nwHistory.length-1];
@@ -2507,12 +2534,20 @@ function initNWChart(){
   const ctx=document.getElementById('nwChart');
   if(!ctx)return;
   const labels=[], data=[];
-  // Generate demo data if history is short
   const {nw}=calcNW();
-  if(S.nwHistory.length<7){
-    for(let i=6;i>=1;i--){const d=new Date();d.setDate(d.getDate()-i);labels.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));data.push(nw-(Math.random()*2000-500));}
+  // Use real history if available, otherwise just show today
+  if(S.nwHistory.length>=2){
+    S.nwHistory.slice(-30).forEach(h=>{
+      labels.push(new Date(h.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+      data.push(h.value);
+    });
   } else {
-    S.nwHistory.slice(-30).forEach(h=>{labels.push(h.date.slice(5));data.push(h.value);});
+    // Single point — show flat line at current value
+    for(let i=6;i>=1;i--){
+      const d=new Date();d.setDate(d.getDate()-i);
+      labels.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+      data.push(nw);
+    }
   }
   labels.push('Today'); data.push(nw);
 
@@ -2655,6 +2690,7 @@ function renderRecentTx(){
 }
 
 function renderAllTx(){
+  renderEntityTracker();
   const el=document.getElementById('all-tx');
   if(!el)return;
   const biz=document.getElementById('tx-filter-biz')?.value||'all';
@@ -2688,11 +2724,13 @@ function addTransaction(){
   const biz=document.getElementById('tx-biz').value;
   const date=document.getElementById('tx-date').value||new Date().toISOString().slice(0,10);
   const icon=document.getElementById('tx-icon').value||'💰';
+  const entity=(document.getElementById('tx-entity').value||'').trim();
   if(!desc||!amt){toast('Fill in description and amount');return;}
-  S.transactions.unshift({desc,amt,type,biz,date,icon});
+  S.transactions.unshift({desc,amt,type,biz,date,icon,entity});
   saveState();closeModal('add-tx-modal');
   renderRecentTx();renderAllTx();updateNWDisplay();renderCalendar();initMixChart();
   document.getElementById('tx-desc').value='';document.getElementById('tx-amt').value='';
+  const txEntityEl=document.getElementById('tx-entity');if(txEntityEl)txEntityEl.value='';
   toast('Transaction added ✓');
 }
 
@@ -2843,8 +2881,8 @@ function renderBills(){
         </div>
       </div>
       <div style="font-size:13px;font-weight:700;color:#fff;flex-shrink:0;margin-right:4px">$${b.amt}</div>
-      <button onclick="editBill(${i})" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0" title="Edit">✏️ Edit</button>
-      <button onclick="deleteBill(${i})" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#EF4444;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0" title="Delete">✕</button>
+      <button onclick="editBillById('${b.id}')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0" title="Edit">✏️ Edit</button>
+      <button onclick="deleteBillById('${b.id}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#EF4444;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0" title="Delete">✕</button>
       <div onclick="toggleBill(${i})" style="width:20px;height:20px;border-radius:50%;border:1.5px solid ${b.paid?'var(--green)':isLate?'var(--red)':'rgba(255,255,255,0.2)'};background:${b.paid?'rgba(34,197,94,0.15)':'transparent'};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:10px;color:var(--green)">${b.paid?'✓':''}</div>
     </div>`;
   };
@@ -3461,9 +3499,15 @@ function saveBill(){
   if(!name){ toast('Enter a name'); return; }
   var obj = {id: 'b'+Date.now(), name:name, amt:amt, due:due, cat:cat, card:card, notes:notes, paid:false};
   if(editIdx !== ''){
-    var i = parseInt(editIdx);
-    obj.paid = S.bills[i] ? S.bills[i].paid : false;
-    S.bills[i] = obj;
+    // editIdx is now an ID string
+    var existingIdx = S.bills.findIndex(function(x){ return x.id === editIdx; });
+    if(existingIdx >= 0){
+      obj.id = editIdx; // preserve original ID
+      obj.paid = S.bills[existingIdx].paid;
+      S.bills[existingIdx] = obj;
+    } else {
+      S.bills.push(obj);
+    }
     toast('Bill updated ✓');
   } else {
     S.bills.push(obj);
@@ -3541,6 +3585,92 @@ function wishFetchPreview(){
       if(loading) loading.style.display='none';
       toast('Preview failed — you can still add manually');
     });
+}
+
+
+// ══════════════════════════════════════════════════
+// ENTITY / COMPANY INCOME TRACKER
+// ══════════════════════════════════════════════════
+function renderEntityTracker(){
+  var el = document.getElementById('entity-list');
+  if(!el) return;
+
+  // Group income transactions by entity
+  var entityMap = {};
+  var thisMonth = new Date().toISOString().slice(0,7);
+  S.transactions.filter(function(t){ return t.type==='income'; }).forEach(function(t){
+    var key = (t.entity && t.entity.trim()) ? t.entity.trim() : (t.desc||'Unknown');
+    if(!entityMap[key]) entityMap[key] = {total:0, count:0, thisMonth:0, biz:t.biz, lastDate:t.date};
+    entityMap[key].total += t.amt;
+    entityMap[key].count += 1;
+    if(t.date && t.date.slice(0,7)===thisMonth) entityMap[key].thisMonth += t.amt;
+    if(t.date > entityMap[key].lastDate) entityMap[key].lastDate = t.date;
+  });
+
+  var entities = Object.keys(entityMap);
+  if(!entities.length){
+    el.innerHTML = '<div style="color:var(--t3);font-size:12px;text-align:center;padding:12px">No income transactions yet — add transactions and tag the company name</div>';
+    return;
+  }
+
+  // Sort by total descending
+  entities.sort(function(a,b){ return entityMap[b].total - entityMap[a].total; });
+
+  var bizColors = {ampm:'var(--violet)',byop:'var(--gold)',nifty:'var(--teal)',cypher:'var(--rose)',personal:'var(--blue)'};
+
+  el.innerHTML = entities.map(function(name){
+    var e = entityMap[name];
+    var avgPerOccurrence = e.count > 0 ? e.total/e.count : 0;
+    var color = bizColors[e.biz] || 'var(--t2)';
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--card2);border-radius:8px;border:1px solid var(--border2)">'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-size:13px;font-weight:600;color:#fff">' + name + '</div>'
+      + '<div style="font-size:10px;color:var(--t2);margin-top:2px">'
+      + e.count + ' payment' + (e.count!==1?'s':'')
+      + ' · avg ' + fmt(avgPerOccurrence)
+      + ' · last ' + (e.lastDate ? new Date(e.lastDate).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '—')
+      + '</div>'
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0">'
+      + '<div style="font-size:14px;font-weight:800;color:' + color + '">' + fmt(e.total) + '</div>'
+      + '<div style="font-size:9px;color:var(--t2)">all time</div>'
+      + (e.thisMonth > 0 ? '<div style="font-size:10px;color:var(--green);font-weight:600">' + fmt(e.thisMonth) + ' this month</div>' : '')
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+// Re-render entity tracker when transactions view loads
+var _origShowView = showView;
+function showView(id){
+  _origShowView(id);
+  if(id==='transactions') renderEntityTracker();
+}
+
+
+function editBillById(id){
+  var b = S.bills.find(function(x){ return x.id === id; });
+  if(!b){ toast('Bill not found'); return; }
+  var titleEl = document.getElementById('bill-modal-title');
+  if(titleEl) titleEl.textContent = 'Edit Bill';
+  document.getElementById('bill-name').value = b.name || '';
+  document.getElementById('bill-amt').value = b.amt || 0;
+  document.getElementById('bill-due').value = b.due || 0;
+  var catEl = document.getElementById('bill-cat');
+  if(catEl) catEl.value = b.cat || 'Other';
+  document.getElementById('bill-card').value = b.card || '';
+  document.getElementById('bill-notes').value = b.notes || '';
+  document.getElementById('bill-edit-idx').value = id;
+  openModal('add-bill-modal');
+}
+
+function deleteBillById(id){
+  var b = S.bills.find(function(x){ return x.id === id; });
+  if(!b) return;
+  if(confirm('Delete "' + b.name + '"?')){
+    S.bills = S.bills.filter(function(x){ return x.id !== id; });
+    saveState(); renderBills(); updateNWDisplay(); toast('Bill deleted');
+  }
 }
 
 </script>
