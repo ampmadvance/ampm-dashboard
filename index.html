@@ -2326,6 +2326,31 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
 
 <!-- BYOP sync now inline in tab -->
+
+<!-- DATA BACKUP / RESTORE PANEL -->
+<div id="data-backup-panel" style="display:none;position:fixed;top:60px;right:16px;width:360px;background:#1D1A24;border:1px solid rgba(201,168,76,0.3);border-radius:14px;padding:18px;z-index:500;box-shadow:0 8px 40px rgba(0,0,0,0.6)">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div style="font-size:14px;font-weight:700;color:#C9A84C">💾 Data Backup & Restore</div>
+    <button onclick="toggleDataPanel()" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:18px;line-height:1">×</button>
+  </div>
+  <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:14px;line-height:1.6">
+    Export your data before switching devices or browsers. Paste it back in to restore everything — transactions, bills, assets, wishlist.
+  </div>
+  <!-- Export -->
+  <div style="margin-bottom:12px">
+    <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#C9A84C;margin-bottom:6px">Export — Copy all your data</div>
+    <textarea id="backup-export-area" style="width:100%;height:80px;background:#0F0D13;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.5);padding:8px;font-size:9px;font-family:monospace;resize:none;box-sizing:border-box" readonly placeholder="Click Export to generate..."></textarea>
+    <button id="backup-export-btn" onclick="doDataExport()" style="width:100%;margin-top:6px;padding:9px;background:#C9A84C;color:#0A0800;border:none;border-radius:8px;font-size:12px;font-weight:800;cursor:pointer">📤 Export & Copy</button>
+  </div>
+  <!-- Import -->
+  <div>
+    <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#C9A84C;margin-bottom:6px">Restore — Paste previously exported data</div>
+    <textarea id="backup-import-area" style="width:100%;height:80px;background:#0F0D13;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:white;padding:8px;font-size:9px;font-family:monospace;resize:none;box-sizing:border-box" placeholder="Paste exported JSON here..."></textarea>
+    <button onclick="doDataImport()" style="width:100%;margin-top:6px;padding:9px;background:transparent;color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.15);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">↻ Restore Data</button>
+    <div id="backup-import-status" style="display:none;margin-top:8px;font-size:11px;font-weight:600;text-align:center"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"><span id="toast-msg"></span></div>
 
 <script>
@@ -3650,6 +3675,10 @@ function showView(id){
 
 function editBillById(id){
   var b = S.bills.find(function(x){ return x.id === id; });
+  if(!b && id === 'undefined'){
+    toast('Reload the page once to fix bill IDs, then try again');
+    return;
+  }
   if(!b){ toast('Bill not found'); return; }
   var titleEl = document.getElementById('bill-modal-title');
   if(titleEl) titleEl.textContent = 'Edit Bill';
@@ -3672,6 +3701,99 @@ function deleteBillById(id){
     saveState(); renderBills(); updateNWDisplay(); toast('Bill deleted');
   }
 }
+
+
+/* ═══════════════════════════════════════════
+   DATA BACKUP / RESTORE
+═══════════════════════════════════════════ */
+function toggleDataPanel(){
+  var p = document.getElementById('data-backup-panel');
+  if(!p) return;
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function doDataExport(){
+  var data = JSON.stringify(S, null, 2);
+  var area = document.getElementById('backup-export-area');
+  var btn = document.getElementById('backup-export-btn');
+  if(area) area.value = data;
+  navigator.clipboard.writeText(data)
+    .then(function(){
+      if(btn){ btn.textContent='✓ Copied to clipboard!'; }
+      setTimeout(function(){ if(btn) btn.textContent='📤 Export & Copy'; }, 3000);
+    })
+    .catch(function(){
+      if(area){ area.select(); document.execCommand('copy'); }
+      if(btn){ btn.textContent='✓ Copied!'; }
+      setTimeout(function(){ if(btn) btn.textContent='📤 Export & Copy'; }, 3000);
+    });
+}
+
+function doDataImport(){
+  var raw = (document.getElementById('backup-import-area').value || '').trim();
+  var status = document.getElementById('backup-import-status');
+
+  function showStatus(ok, msg){
+    if(status){
+      status.style.display = 'block';
+      status.style.color = ok ? '#22C55E' : '#EF4444';
+      status.textContent = msg;
+    }
+  }
+
+  if(!raw){ showStatus(false, 'Paste your exported data first'); return; }
+
+  var parsed;
+  try{ parsed = JSON.parse(raw); }
+  catch(e){ showStatus(false, 'Invalid data — make sure you copied the full export'); return; }
+
+  if(!parsed || typeof parsed !== 'object'){
+    showStatus(false, 'Unrecognized format'); return;
+  }
+
+  // Merge into S
+  if(parsed.transactions) S.transactions = parsed.transactions;
+  if(parsed.bills) S.bills = parsed.bills;
+  if(parsed.assets) S.assets = parsed.assets;
+  if(parsed.wishlist) S.wishlist = parsed.wishlist;
+  if(parsed.holdings) S.holdings = parsed.holdings;
+  if(parsed.net30) S.net30 = parsed.net30;
+  if(parsed.cash) S.cash = parsed.cash;
+  if(parsed.nwHistory) S.nwHistory = parsed.nwHistory;
+
+  saveState();
+
+  // Refresh everything
+  try{ updateNWDisplay(); }catch(e){}
+  try{ renderBills(); }catch(e){}
+  try{ renderRecentTx(); }catch(e){}
+  try{ renderAllTx(); }catch(e){}
+  try{ renderHoldings(); }catch(e){}
+  try{ renderWishlist('all'); }catch(e){}
+  try{ renderNet30(); }catch(e){}
+
+  var txCount = (parsed.transactions||[]).length;
+  var billCount = (parsed.bills||[]).length;
+  showStatus(true, '✓ Restored! ' + txCount + ' transactions, ' + billCount + ' bills loaded.');
+
+  setTimeout(function(){
+    toggleDataPanel();
+    if(status) status.style.display = 'none';
+  }, 3000);
+}
+
+
+/* Auto-assign IDs to bills/assets missing them */
+(function migrateMissingIDs(){
+  var changed = false;
+  (S.bills||[]).forEach(function(b,i){
+    if(!b.id){ b.id = 'b_' + i + '_' + Date.now(); changed = true; }
+  });
+  (S.assets||[]).forEach(function(a,i){
+    if(!a.id){ a.id = 'a_' + i + '_' + Date.now(); changed = true; }
+  });
+  if(changed) try{ saveState(); }catch(e){}
+})();
 
 </script>
 </body>
