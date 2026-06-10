@@ -2906,8 +2906,8 @@ function renderBills(){
         </div>
       </div>
       <div style="font-size:13px;font-weight:700;color:#fff;flex-shrink:0;margin-right:4px">$${b.amt}</div>
-      <button onclick="editBillById('${b.id}')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0" title="Edit">✏️ Edit</button>
-      <button onclick="deleteBillById('${b.id}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#EF4444;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0" title="Delete">✕</button>
+      <button class="bill-edit-btn" data-id="${b.id}" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0">✏️ Edit</button>
+      <button class="bill-del-btn" data-id="${b.id}" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#EF4444;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;flex-shrink:0">✕</button>
       <div onclick="toggleBill(${i})" style="width:20px;height:20px;border-radius:50%;border:1.5px solid ${b.paid?'var(--green)':isLate?'var(--red)':'rgba(255,255,255,0.2)'};background:${b.paid?'rgba(34,197,94,0.15)':'transparent'};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:10px;color:var(--green)">${b.paid?'✓':''}</div>
     </div>`;
   };
@@ -3549,252 +3549,329 @@ function saveBill(){
 </script>
 
 <script>
-/* ── WISHLIST IMAGE PREVIEW via Microlink API ── */
-var _wishPreviewData = {};
+/* ═══════════════════════════════════════════════════
+   AMPM DASHBOARD — ISOLATED BOTTOM SCRIPT
+   All critical interactive functions defined here.
+   Attached via addEventListener after DOM loads.
+═══════════════════════════════════════════════════ */
 
-function clearWishPreview(){
-  var card = document.getElementById('wish-preview-card');
-  if(card) card.style.display='none';
-  _wishPreviewData = {};
-}
-
-function wishFetchPreview(){
-  var urlEl = document.getElementById('wish-url');
-  var url = urlEl ? urlEl.value.trim() : '';
-  if(!url || !url.startsWith('http')){ toast('Paste a valid link first'); return; }
-
-  var loading = document.getElementById('wish-preview-loading');
-  var card = document.getElementById('wish-preview-card');
-  if(loading) loading.style.display='block';
-  if(card) card.style.display='none';
-
-  // Use microlink.io — free, no API key, pulls og:image + title
-  fetch('https://api.microlink.io/?url=' + encodeURIComponent(url) + '&screenshot=false&meta=true')
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      if(loading) loading.style.display='none';
-      if(data.status !== 'success' && data.status !== 'partial'){ toast('Could not fetch preview — fill in manually'); return; }
-
-      var d = data.data || {};
-      var title = d.title || d.description || '';
-      var imgUrl = (d.image && d.image.url) ? d.image.url : '';
-      var domain = '';
-      try{ domain = new URL(url).hostname.replace('www.',''); }catch(e){}
-
-      // Store for addWish to use
-      _wishPreviewData = {title:title, imgUrl:imgUrl, domain:domain};
-
-      // Auto-fill name if empty
-      var nameEl = document.getElementById('wish-name-input');
-      if(nameEl && !nameEl.value && title) nameEl.value = title.slice(0,60);
-
-      // Auto-fill img if empty
-      var imgEl = document.getElementById('wish-img-input');
-      if(imgEl && !imgEl.value && imgUrl) imgEl.value = imgUrl;
-
-      // Show preview card
-      if(card){
-        card.style.display='block';
-        var imgWrap = document.getElementById('wish-preview-img-wrap');
-        var titleEl = document.getElementById('wish-preview-title');
-        var domainEl = document.getElementById('wish-preview-domain');
-
-        if(imgWrap && imgUrl){
-          imgWrap.innerHTML = '<img src="'+imgUrl+'" style="width:64px;height:64px;object-fit:cover;border-radius:8px" onerror="this.parentElement.innerHTML='🛒'">';
-        }
-        if(titleEl) titleEl.textContent = title.slice(0,80) || url.slice(0,60);
-        if(domainEl) domainEl.textContent = '↗ ' + domain;
-      }
-    })
-    .catch(function(e){
-      if(loading) loading.style.display='none';
-      toast('Preview failed — you can still add manually');
-    });
-}
-
-
-// ══════════════════════════════════════════════════
-// ENTITY / COMPANY INCOME TRACKER
-// ══════════════════════════════════════════════════
-function renderEntityTracker(){
-  var el = document.getElementById('entity-list');
-  if(!el) return;
-
-  // Group income transactions by entity
-  var entityMap = {};
-  var thisMonth = new Date().toISOString().slice(0,7);
-  S.transactions.filter(function(t){ return t.type==='income'; }).forEach(function(t){
-    var key = (t.entity && t.entity.trim()) ? t.entity.trim() : (t.desc||'Unknown');
-    if(!entityMap[key]) entityMap[key] = {total:0, count:0, thisMonth:0, biz:t.biz, lastDate:t.date};
-    entityMap[key].total += t.amt;
-    entityMap[key].count += 1;
-    if(t.date && t.date.slice(0,7)===thisMonth) entityMap[key].thisMonth += t.amt;
-    if(t.date > entityMap[key].lastDate) entityMap[key].lastDate = t.date;
+/* ── BILL EDIT / DELETE via event delegation ── */
+function attachBillListeners() {
+  // Use event delegation on the bills container — catches dynamically rendered rows
+  var containers = document.querySelectorAll('.bills-list, #bills-list, #upcoming-bills, #all-bills');
+  
+  // Also attach to document as final fallback
+  document.addEventListener('click', function(e) {
+    var editBtn = e.target.closest('.bill-edit-btn');
+    var delBtn = e.target.closest('.bill-del-btn');
+    
+    if (editBtn) {
+      e.stopPropagation();
+      var id = editBtn.getAttribute('data-id');
+      openBillEditModal(id);
+    }
+    if (delBtn) {
+      e.stopPropagation();
+      var id = delBtn.getAttribute('data-id');
+      confirmDeleteBill(id);
+    }
   });
-
-  var entities = Object.keys(entityMap);
-  if(!entities.length){
-    el.innerHTML = '<div style="color:var(--t3);font-size:12px;text-align:center;padding:12px">No income transactions yet — add transactions and tag the company name</div>';
-    return;
-  }
-
-  // Sort by total descending
-  entities.sort(function(a,b){ return entityMap[b].total - entityMap[a].total; });
-
-  var bizColors = {ampm:'var(--violet)',byop:'var(--gold)',nifty:'var(--teal)',cypher:'var(--rose)',personal:'var(--blue)'};
-
-  el.innerHTML = entities.map(function(name){
-    var e = entityMap[name];
-    var avgPerOccurrence = e.count > 0 ? e.total/e.count : 0;
-    var color = bizColors[e.biz] || 'var(--t2)';
-    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--card2);border-radius:8px;border:1px solid var(--border2)">'
-      + '<div style="flex:1;min-width:0">'
-      + '<div style="font-size:13px;font-weight:600;color:#fff">' + name + '</div>'
-      + '<div style="font-size:10px;color:var(--t2);margin-top:2px">'
-      + e.count + ' payment' + (e.count!==1?'s':'')
-      + ' · avg ' + fmt(avgPerOccurrence)
-      + ' · last ' + (e.lastDate ? new Date(e.lastDate).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '—')
-      + '</div>'
-      + '</div>'
-      + '<div style="text-align:right;flex-shrink:0">'
-      + '<div style="font-size:14px;font-weight:800;color:' + color + '">' + fmt(e.total) + '</div>'
-      + '<div style="font-size:9px;color:var(--t2)">all time</div>'
-      + (e.thisMonth > 0 ? '<div style="font-size:10px;color:var(--green);font-weight:600">' + fmt(e.thisMonth) + ' this month</div>' : '')
-      + '</div>'
-      + '</div>';
-  }).join('');
 }
 
-// Re-render entity tracker when transactions view loads
-var _origShowView = showView;
-function showView(id){
-  _origShowView(id);
-  if(id==='transactions') renderEntityTracker();
-}
-
-
-function editBillById(id){
-  var b = S.bills.find(function(x){ return x.id === id; });
-  if(!b && id === 'undefined'){
-    toast('Reload the page once to fix bill IDs, then try again');
-    return;
-  }
-  if(!b){ toast('Bill not found'); return; }
-  var titleEl = document.getElementById('bill-modal-title');
-  if(titleEl) titleEl.textContent = 'Edit Bill';
-  document.getElementById('bill-name').value = b.name || '';
-  document.getElementById('bill-amt').value = b.amt || 0;
-  document.getElementById('bill-due').value = b.due || 0;
-  var catEl = document.getElementById('bill-cat');
-  if(catEl) catEl.value = b.cat || 'Other';
-  document.getElementById('bill-card').value = b.card || '';
-  document.getElementById('bill-notes').value = b.notes || '';
-  document.getElementById('bill-edit-idx').value = id;
-  openModal('add-bill-modal');
-}
-
-function deleteBillById(id){
-  var b = S.bills.find(function(x){ return x.id === id; });
-  if(!b) return;
-  if(confirm('Delete "' + b.name + '"?')){
-    S.bills = S.bills.filter(function(x){ return x.id !== id; });
-    saveState(); renderBills(); updateNWDisplay(); toast('Bill deleted');
-  }
-}
-
-
-/* ═══════════════════════════════════════════
-   DATA BACKUP / RESTORE
-═══════════════════════════════════════════ */
-function toggleDataPanel(){
-  var p = document.getElementById('data-backup-panel');
-  if(!p) return;
-  p.style.display = p.style.display === 'none' ? 'block' : 'none';
-}
-
-function doDataExport(){
-  var data = JSON.stringify(S, null, 2);
-  var area = document.getElementById('backup-export-area');
-  var btn = document.getElementById('backup-export-btn');
-  if(area) area.value = data;
-  navigator.clipboard.writeText(data)
-    .then(function(){
-      if(btn){ btn.textContent='✓ Copied to clipboard!'; }
-      setTimeout(function(){ if(btn) btn.textContent='📤 Export & Copy'; }, 3000);
-    })
-    .catch(function(){
-      if(area){ area.select(); document.execCommand('copy'); }
-      if(btn){ btn.textContent='✓ Copied!'; }
-      setTimeout(function(){ if(btn) btn.textContent='📤 Export & Copy'; }, 3000);
-    });
-}
-
-function doDataImport(){
-  var raw = (document.getElementById('backup-import-area').value || '').trim();
-  var status = document.getElementById('backup-import-status');
-
-  function showStatus(ok, msg){
-    if(status){
-      status.style.display = 'block';
-      status.style.color = ok ? '#22C55E' : '#EF4444';
-      status.textContent = msg;
+function openBillEditModal(id) {
+  // Find the bill — support both id match and name match as fallback
+  var bill = null;
+  for (var i = 0; i < S.bills.length; i++) {
+    if (S.bills[i].id === id || String(S.bills[i].id) === String(id)) {
+      bill = S.bills[i];
+      break;
     }
   }
-
-  if(!raw){ showStatus(false, 'Paste your exported data first'); return; }
-
-  var parsed;
-  try{ parsed = JSON.parse(raw); }
-  catch(e){ showStatus(false, 'Invalid data — make sure you copied the full export'); return; }
-
-  if(!parsed || typeof parsed !== 'object'){
-    showStatus(false, 'Unrecognized format'); return;
+  
+  if (!bill) {
+    // Last resort: if id looks like index, use it as index
+    var idx = parseInt(id);
+    if (!isNaN(idx) && S.bills[idx]) bill = S.bills[idx];
+  }
+  
+  if (!bill) {
+    alert('Could not find bill. Try saving and reloading the page.');
+    return;
   }
 
-  // Merge into S
-  if(parsed.transactions) S.transactions = parsed.transactions;
-  if(parsed.bills) S.bills = parsed.bills;
-  if(parsed.assets) S.assets = parsed.assets;
-  if(parsed.wishlist) S.wishlist = parsed.wishlist;
-  if(parsed.holdings) S.holdings = parsed.holdings;
-  if(parsed.net30) S.net30 = parsed.net30;
-  if(parsed.cash) S.cash = parsed.cash;
-  if(parsed.nwHistory) S.nwHistory = parsed.nwHistory;
+  // Set modal title
+  var titleEl = document.getElementById('bill-modal-title');
+  if (titleEl) titleEl.textContent = 'Edit Bill';
 
-  saveState();
+  // Fill fields safely
+  var fields = {
+    'bill-name': bill.name || '',
+    'bill-amt': bill.amt || 0,
+    'bill-due': bill.due || 0,
+    'bill-card': bill.card || '',
+    'bill-notes': bill.notes || '',
+    'bill-edit-idx': bill.id || id
+  };
+  
+  Object.keys(fields).forEach(function(fieldId) {
+    var el = document.getElementById(fieldId);
+    if (el) el.value = fields[fieldId];
+  });
+  
+  // Set category select
+  var catEl = document.getElementById('bill-cat');
+  if (catEl && bill.cat) catEl.value = bill.cat;
 
-  // Refresh everything
-  try{ updateNWDisplay(); }catch(e){}
-  try{ renderBills(); }catch(e){}
-  try{ renderRecentTx(); }catch(e){}
-  try{ renderAllTx(); }catch(e){}
-  try{ renderHoldings(); }catch(e){}
-  try{ renderWishlist('all'); }catch(e){}
-  try{ renderNet30(); }catch(e){}
+  // Open modal
+  var modal = document.getElementById('add-bill-modal');
+  if (modal) {
+    modal.classList.add('open');
+    modal.style.display = 'flex';
+  }
+}
 
-  var txCount = (parsed.transactions||[]).length;
-  var billCount = (parsed.bills||[]).length;
-  showStatus(true, '✓ Restored! ' + txCount + ' transactions, ' + billCount + ' bills loaded.');
+function confirmDeleteBill(id) {
+  var bill = S.bills.find(function(b) { return String(b.id) === String(id); });
+  var name = bill ? bill.name : 'this bill';
+  if (confirm('Delete "' + name + '"?')) {
+    S.bills = S.bills.filter(function(b) { return String(b.id) !== String(id); });
+    try { saveState(); } catch(e) {}
+    try { renderBills(); } catch(e) {}
+    try { updateNWDisplay(); } catch(e) {}
+    if (typeof toast === 'function') toast('Bill deleted');
+  }
+}
 
-  setTimeout(function(){
-    toggleDataPanel();
-    if(status) status.style.display = 'none';
+/* ── BYOP SYNC ── */
+function byopSyncNow() {
+  var btn = document.getElementById('byop-sync-btn');
+  var status = document.getElementById('byop-sync-status');
+  var raw = (document.getElementById('byop-paste-area').value || '').trim();
+
+  function showStatus(ok, msg) {
+    if (status) {
+      status.style.display = 'block';
+      status.style.background = ok ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.12)';
+      status.style.color = ok ? '#22C55E' : '#EF4444';
+      status.style.border = '1px solid ' + (ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.25)');
+      status.textContent = msg;
+    }
+    if (btn) { btn.textContent = '↻ SYNC NOW'; btn.disabled = false; }
+  }
+
+  if (!raw) { showStatus(false, '✗ Paste your exported data first'); return; }
+  if (btn) { btn.textContent = 'Syncing...'; btn.disabled = true; }
+
+  var parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { showStatus(false, '✗ Invalid JSON — use the Copy button in BYOP app'); return; }
+
+  if (!parsed || (!parsed.kits && !parsed.supplies)) {
+    showStatus(false, '✗ No kit or supply data found'); return;
+  }
+
+  try {
+    if (typeof BS !== 'undefined') {
+      if (parsed.kits) BS.kits = parsed.kits;
+      if (parsed.supplies) BS.supplies = parsed.supplies;
+      if (parsed.assemblies) BS.assemblies = parsed.assemblies;
+      localStorage.setItem('byop_dash_v1', JSON.stringify(BS));
+    }
+  } catch (e) {}
+
+  try { renderByopKits(); } catch (e) {}
+  try { renderByopKitKPIs(); } catch (e) {}
+  try { renderByopSupplies(); } catch (e) {}
+  try { updateNWDisplay(); } catch (e) {}
+
+  if (document.getElementById('byop-paste-area')) document.getElementById('byop-paste-area').value = '';
+  var kc = (parsed.kits || []).length;
+  var sc = (parsed.supplies || []).length;
+  showStatus(true, '✓ Synced! ' + kc + ' kits + ' + sc + ' supplies.');
+  setTimeout(function() {
+    var panel = document.getElementById('byop-sync-panel');
+    if (panel) panel.style.display = 'none';
+    if (status) status.style.display = 'none';
+    if (btn) btn.textContent = '↻ SYNC NOW';
   }, 3000);
 }
 
+function byopExportNow() {
+  var area = document.getElementById('byop-export-area');
+  var btn = document.getElementById('byop-export-btn');
+  var data = '{}';
+  try { data = JSON.stringify(typeof BS !== 'undefined' ? BS : {}, null, 2); } catch (e) {}
+  if (area) { area.style.display = 'block'; area.value = data; area.select(); }
+  try {
+    navigator.clipboard.writeText(data).then(function() {
+      if (btn) { btn.textContent = '✓ Copied!'; setTimeout(function() { btn.textContent = '📤 Export'; }, 2000); }
+    });
+  } catch (e) {
+    try { document.execCommand('copy'); } catch (e2) {}
+    if (btn) { btn.textContent = '✓ Copied!'; setTimeout(function() { btn.textContent = '📤 Export'; }, 2000); }
+  }
+}
 
-/* Auto-assign IDs to bills/assets missing them */
-(function migrateMissingIDs(){
+function toggleByopSyncPanel() {
+  var p = document.getElementById('byop-sync-panel');
+  if (!p) return;
+  p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+}
+
+/* ── DATA BACKUP / RESTORE ── */
+function toggleDataPanel() {
+  var p = document.getElementById('data-backup-panel');
+  if (!p) return;
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function doDataExport() {
+  var data = JSON.stringify(S, null, 2);
+  var area = document.getElementById('backup-export-area');
+  var btn = document.getElementById('backup-export-btn');
+  if (area) area.value = data;
+  navigator.clipboard.writeText(data)
+    .then(function() {
+      if (btn) { btn.textContent = '✓ Copied!'; setTimeout(function() { btn.textContent = '📤 Export & Copy'; }, 3000); }
+    })
+    .catch(function() {
+      if (area) { area.select(); document.execCommand('copy'); }
+      if (btn) { btn.textContent = '✓ Copied!'; setTimeout(function() { btn.textContent = '📤 Export & Copy'; }, 3000); }
+    });
+}
+
+function doDataImport() {
+  var raw = (document.getElementById('backup-import-area').value || '').trim();
+  var status = document.getElementById('backup-import-status');
+  function showStatus(ok, msg) {
+    if (status) { status.style.display='block'; status.style.color=ok?'#22C55E':'#EF4444'; status.textContent=msg; }
+  }
+  if (!raw) { showStatus(false, 'Paste your exported data first'); return; }
+  var parsed;
+  try { parsed = JSON.parse(raw); } catch(e) { showStatus(false, 'Invalid data format'); return; }
+  if (parsed.transactions) S.transactions = parsed.transactions;
+  if (parsed.bills) S.bills = parsed.bills;
+  if (parsed.assets) S.assets = parsed.assets;
+  if (parsed.wishlist) S.wishlist = parsed.wishlist;
+  if (parsed.holdings) S.holdings = parsed.holdings;
+  if (parsed.net30) S.net30 = parsed.net30;
+  if (typeof parsed.cash !== 'undefined') S.cash = parsed.cash;
+  if (parsed.nwHistory) S.nwHistory = parsed.nwHistory;
+  try { saveState(); } catch(e) {}
+  try { updateNWDisplay(); } catch(e) {}
+  try { renderBills(); } catch(e) {}
+  try { renderRecentTx(); } catch(e) {}
+  try { renderAllTx(); } catch(e) {}
+  try { renderHoldings(); } catch(e) {}
+  try { renderWishlist('all'); } catch(e) {}
+  try { renderNet30(); } catch(e) {}
+  var txCount = (parsed.transactions||[]).length;
+  showStatus(true, '✓ Restored ' + txCount + ' transactions + all data.');
+  setTimeout(function() { toggleDataPanel(); if(status) status.style.display='none'; }, 3000);
+}
+
+/* ── ID MIGRATION — runs once, gives IDs to bills without them ── */
+(function migrateMissingIDs() {
   var changed = false;
-  (S.bills||[]).forEach(function(b,i){
-    if(!b.id){ b.id = 'b_' + i + '_' + Date.now(); changed = true; }
+  (S.bills || []).forEach(function(b, i) {
+    if (!b.id) { b.id = 'b_' + i + '_' + Date.now(); changed = true; }
   });
-  (S.assets||[]).forEach(function(a,i){
-    if(!a.id){ a.id = 'a_' + i + '_' + Date.now(); changed = true; }
+  (S.assets || []).forEach(function(a, i) {
+    if (!a.id) { a.id = 'a_' + i + '_' + Date.now(); changed = true; }
   });
-  if(changed) try{ saveState(); }catch(e){}
+  if (changed) {
+    try { saveState(); } catch(e) {}
+    // Re-render so buttons get the new IDs
+    try { renderBills(); } catch(e) {}
+  }
 })();
 
+/* ── ATTACH BILL LISTENERS after DOM is ready ── */
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', attachBillListeners);
+} else {
+  attachBillListeners();
+}
+
+/* ── WISHLIST PREVIEW ── */
+function clearWishPreview() {
+  var card = document.getElementById('wish-preview-card');
+  if (card) card.style.display = 'none';
+}
+
+function wishFetchPreview() {
+  var urlEl = document.getElementById('wish-url');
+  var url = urlEl ? urlEl.value.trim() : '';
+  if (!url || !url.startsWith('http')) { if(typeof toast==='function') toast('Paste a valid link first'); return; }
+  var loading = document.getElementById('wish-preview-loading');
+  var card = document.getElementById('wish-preview-card');
+  if (loading) loading.style.display = 'block';
+  if (card) card.style.display = 'none';
+  fetch('https://api.microlink.io/?url=' + encodeURIComponent(url))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (loading) loading.style.display = 'none';
+      if (data.status !== 'success' && data.status !== 'partial') return;
+      var d = data.data || {};
+      var title = d.title || '';
+      var imgUrl = (d.image && d.image.url) ? d.image.url : '';
+      var domain = '';
+      try { domain = new URL(url).hostname.replace('www.', ''); } catch(e) {}
+      var nameEl = document.getElementById('wish-name-input');
+      if (nameEl && !nameEl.value && title) nameEl.value = title.slice(0, 60);
+      var imgEl = document.getElementById('wish-img-input');
+      if (imgEl && !imgEl.value && imgUrl) imgEl.value = imgUrl;
+      if (card) {
+        card.style.display = 'block';
+        var imgWrap = document.getElementById('wish-preview-img-wrap');
+        var titleEl2 = document.getElementById('wish-preview-title');
+        var domainEl = document.getElementById('wish-preview-domain');
+        if (imgWrap && imgUrl) imgWrap.innerHTML = '<img src="' + imgUrl + '" style="width:64px;height:64px;object-fit:cover;border-radius:8px">';
+        if (titleEl2) titleEl2.textContent = title.slice(0, 80);
+        if (domainEl) domainEl.textContent = '↗ ' + domain;
+      }
+    })
+    .catch(function() { if (loading) loading.style.display = 'none'; });
+}
+
+/* ── ENTITY TRACKER ── */
+function renderEntityTracker() {
+  var el = document.getElementById('entity-list');
+  if (!el) return;
+  var entityMap = {};
+  var thisMonth = new Date().toISOString().slice(0, 7);
+  (S.transactions || []).filter(function(t) { return t.type === 'income'; }).forEach(function(t) {
+    var key = (t.entity && t.entity.trim()) ? t.entity.trim() : (t.desc || 'Unknown');
+    if (!entityMap[key]) entityMap[key] = { total: 0, count: 0, thisMonth: 0, biz: t.biz, lastDate: t.date };
+    entityMap[key].total += t.amt;
+    entityMap[key].count += 1;
+    if (t.date && t.date.slice(0, 7) === thisMonth) entityMap[key].thisMonth += t.amt;
+    if (t.date > entityMap[key].lastDate) entityMap[key].lastDate = t.date;
+  });
+  var entities = Object.keys(entityMap);
+  if (!entities.length) {
+    el.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:12px;text-align:center;padding:12px">Add income transactions and tag the company name to see forecasting here</div>';
+    return;
+  }
+  entities.sort(function(a, b) { return entityMap[b].total - entityMap[a].total; });
+  var bizColors = { ampm: '#A78BFA', byop: '#C9A84C', nifty: '#14B8A6', cypher: '#F472B6' };
+  el.innerHTML = entities.map(function(name) {
+    var e = entityMap[name];
+    var avg = e.count > 0 ? e.total / e.count : 0;
+    var color = bizColors[e.biz] || 'rgba(255,255,255,0.5)';
+    var fmtVal = function(n) { return '$' + (n||0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}); };
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:#1D1A24;border-radius:8px;border:1px solid rgba(255,255,255,0.05);margin-bottom:6px">'
+      + '<div style="flex:1">'
+      + '<div style="font-size:13px;font-weight:600;color:#fff">' + name + '</div>'
+      + '<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px">'
+      + e.count + ' payment' + (e.count !== 1 ? 's' : '') + ' · avg ' + fmtVal(avg)
+      + (e.lastDate ? ' · last ' + new Date(e.lastDate).toLocaleDateString('en-US', {month:'short',day:'numeric'}) : '')
+      + '</div></div>'
+      + '<div style="text-align:right">'
+      + '<div style="font-size:14px;font-weight:800;color:' + color + '">' + fmtVal(e.total) + '</div>'
+      + (e.thisMonth > 0 ? '<div style="font-size:10px;color:#22C55E">' + fmtVal(e.thisMonth) + ' this mo.</div>' : '')
+      + '</div></div>';
+  }).join('');
+}
 </script>
 </body>
-</html>
