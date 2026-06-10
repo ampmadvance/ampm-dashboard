@@ -1369,7 +1369,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
   /* all grids stack */
   .g2,.g3,.g4,.kpi-row{grid-template-columns:1fr !important}
-  #overview-main-grid{grid-template-columns:1fr !important}
+  
 
   /* KPI tiles 2-up */
   .kpi-row{grid-template-columns:1fr 1fr !important}
@@ -1424,12 +1424,12 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
   .main{margin-left:220px !important}
   .sidebar-overlay{display:none !important}
   /* desktop: overview 2-col */
-  #overview-main-grid{grid-template-columns:minmax(0,1fr) 340px}
+  
 }
 
 @media(min-width:701px) and (max-width:960px){
   .main{margin-left:220px}
-  #overview-main-grid{grid-template-columns:1fr}
+  
 }
 
 
@@ -1440,6 +1440,87 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 .content{overflow-x:hidden;width:100%}
 /* business view containers fill width */
 [id^="biz-view-"]{width:100%}
+
+
+/* ═══════════════════════════════════════════════════
+   DEFINITIVE LAYOUT — overrides all previous patches
+   Single source of truth for the dashboard layout
+═══════════════════════════════════════════════════ */
+
+/* Shell & main structure */
+.shell { display: block; min-height: 100vh; }
+.sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 220px;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; z-index: 150; overflow-y: auto;
+  transition: transform .28s cubic-bezier(.16,1,.3,1);
+}
+/* CRITICAL: NO overflow on .main — breaks position:sticky */
+.main {
+  margin-left: 220px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sticky headers — work because .main has no overflow */
+.topbar {
+  position: sticky; top: 0; z-index: 99;
+  background: rgba(10,10,11,0.97); backdrop-filter: blur(20px);
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; flex-shrink: 0;
+}
+.biz-tabs {
+  position: sticky; top: 53px; z-index: 98;
+  background: rgba(10,10,11,0.97); backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  display: flex; flex-wrap: nowrap; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  padding: 0 20px; flex-shrink: 0;
+}
+.biz-tabs::-webkit-scrollbar { display: none; }
+.biz-tab { white-space: nowrap; flex-shrink: 0; }
+
+/* Content area */
+.content { padding: 20px 24px; flex: 1; overflow-x: hidden; }
+
+/* Views — only active one shows */
+.view { display: none; }
+.view.active { display: block; }
+
+/* Overview grid: 2-col on desktop, 1-col on tablet */
+
+
+/* Mobile: sidebar becomes slide-over */
+@media (max-width: 700px) {
+  .sidebar { transform: translateX(-220px); box-shadow: none; }
+  .sidebar.open { transform: translateX(0); box-shadow: 12px 0 48px rgba(0,0,0,0.7); }
+  .main { margin-left: 0; }
+  .hamburger { display: flex !important; }
+  .topbar { padding: 10px 12px; gap: 8px; }
+  #tb-date { display: none; }
+  .topbar .btn-sm.btn-ghost { display: none; }
+  .biz-tabs { padding: 0 8px; top: 50px; }
+  .biz-tab { padding: 9px 12px; font-size: 11px; }
+  .content { padding: 12px 10px; }
+  .g2, .g3, .g4 { grid-template-columns: 1fr !important; }
+  
+  .kpi-row { grid-template-columns: 1fr 1fr !important; }
+  #overview-main-grid { flex-direction: column !important; }
+  #overview-main-grid > div { width: 100% !important; }
+  .chart-area { height: 120px; }
+  .nw-hero { padding: 14px 14px 10px; }
+  .nw-amount { font-size: 28px !important; }
+}
+@media (min-width: 701px) {
+  .hamburger { display: none !important; }
+  .sidebar { transform: none !important; }
+  .sidebar-overlay { display: none !important; }
+}
+@media (min-width: 701px) and (max-width: 960px) {
+  
+}
 
 </style>
 </head>
@@ -1520,7 +1601,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
   <!-- BIZ TABS -->
   <div class="biz-tabs" id="biz-tabs-bar">
-    <button class="biz-tab active" data-view="ampm_all" onclick="bizTab(this,'ampm_all')">
+    <button class="biz-tab active" data-view="overview" onclick="bizTab(this,'overview')">
       <span class="tab-dot" style="background:var(--gold)"></span>AMPM Overview
     </button>
     <button class="biz-tab" data-view="byop" onclick="bizTab(this,'byop')">
@@ -1546,9 +1627,9 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
   <!-- ════ OVERVIEW ════ -->
   <div class="view active" id="view-overview">
-    <div class="g2" style="gap:14px;margin-bottom:14px;align-items:start" id="overview-main-grid">
+    <div id="overview-main-grid" style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
       <!-- LEFT: Net Worth Chart -->
-      <div style="grid-column:1/2">
+      <div style="flex:1;min-width:0;">
         <div class="nw-hero">
           <div class="nw-label">Total Net Worth</div>
           <div class="nw-amount neutral" id="nw-display">$0</div>
@@ -1607,7 +1688,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
       </div>
 
       <!-- RIGHT: Summary panels -->
-      <div class="gcol">
+      <div class="gcol" style="width:340px;flex-shrink:0;">
         <!-- Net Worth Breakdown -->
         <div class="nw-side-card">
           <div class="nw-side-section nw-assets">
@@ -3326,7 +3407,11 @@ function bizTab(el,id){
   el.classList.add('active');
   try{ el.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); }catch(e){}
   showView(id);
-  if(bizConfigs[id]) renderBizView(id);
+  // Don't call renderBizView for overview — it has its own static content
+  if(id !== 'overview' && bizConfigs[id]) renderBizView(id);
+  // Handle consulting and print explicitly
+  if(id === 'ampm_consulting') renderBizView('ampm_consulting');
+  if(id === 'ampm_print') renderBizView('ampm_print');
   closeSidebarOnMobile();
 }
 
@@ -3334,6 +3419,7 @@ function showView(id){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   const v=document.getElementById('view-'+id);
   if(v){v.classList.add('active');}
+  if(id==='overview'){try{updateNWDisplay();}catch(e){} try{renderRecentTx();}catch(e){} try{renderBills();}catch(e){}}
   if(id==='transactions')renderAllTx();
   if(id==='bills'){renderBills();renderNet30();}
   if(id==='holdings'){renderHoldings();setTimeout(initHoldingsChart,100);}
