@@ -1532,12 +1532,12 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
       <span class="tab-dot" style="background:var(--rose)"></span>Cypher
     </button>
     <button class="biz-tab" data-view="ampm_print" onclick="bizTab(this,'ampm_print')">
-      <span class="tab-dot" style="background:var(--violet)"></span>AMPM Print
+      <span class="tab-dot" style="background:#A78BFA"></span>Print &amp; Design
     </button>
-    <button class="biz-tab" data-view="ampm_design" onclick="bizTab(this,'ampm_design')">
-      <span class="tab-dot" style="background:#60A5FA"></span>AMPM Design
+    <button class="biz-tab" data-view="ampm_consulting" onclick="bizTab(this,'ampm_consulting')">
+      <span class="tab-dot" style="background:#F97316"></span>Consulting
     </button>
-    <div style="flex-shrink:0;width:12px"></div><!-- right padding spacer -->
+  </div><!-- right padding spacer -->
   </div>
 
   <!-- CONTENT -->
@@ -2111,7 +2111,13 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
       <div class="form-group"><label class="form-label">Type</label><select id="tx-type"><option value="income">Income</option><option value="expense">Expense</option></select></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Business</label><select id="tx-biz"><option value="ampm">AMPM</option><option value="byop">BYOP Vibes</option><option value="nifty">Nifty Thrifty</option><option value="cypher">Cypher</option><option value="personal">Personal</option></select></div>
+      <div class="form-group"><label class="form-label">Business</label><select id="tx-biz">
+            <option value="ampm">Consulting (SW Research, Qmee, Energizer...)</option>
+            <option value="print">AMPM Print &amp; Design</option>
+            <option value="byop">BYOP Vibes</option>
+            <option value="nifty">Nifty Thrifty</option>
+            <option value="cypher">Cypher the Culture</option>
+          </select></div>
       <div class="form-group"><label class="form-label">Date</label><input id="tx-date" type="date"></div>
     </div>
     <div class="form-row">
@@ -3232,12 +3238,12 @@ function addShirtManual(){
 // BUSINESS TABS VIEW BUILDER
 // ══════════════════════════════════════════════════
 const bizConfigs={
-  ampm_all:{name:'AMPM Advance',color:'var(--gold)',dot:'gold',desc:'All businesses combined',incomeTag:'ampm'},
-  ampm_print:{name:'AMPM Print & Apparel',color:'#A78BFA',dot:'violet',desc:'Cricut, heat press, t-shirts, custom apparel',incomeTag:'ampm'},
+  ampm_all:{name:'AMPM Advance — All',color:'var(--gold)',dot:'gold',desc:'All businesses combined',incomeTag:'all'},
+  ampm_print:{name:'AMPM Print & Design',color:'#A78BFA',dot:'violet',desc:'Custom print, apparel, Cricut, heat press, design',incomeTag:'print'},
+  ampm_consulting:{name:'AMPM Consulting',color:'#F97316',dot:'orange',desc:'Research, consulting partnerships · Qmee, Energizer, SW Research',incomeTag:'ampm'},
   byop:{name:'BYOP Vibes',color:'var(--gold)',dot:'gold',desc:'Luxury custom party kits · byopvibes.com',incomeTag:'byop'},
   nifty:{name:'Nifty Thrifty',color:'var(--teal)',dot:'teal',desc:'Retail arbitrage + referral network',incomeTag:'nifty'},
   cypher:{name:'Cypher the Culture',color:'var(--rose)',dot:'rose',desc:'Hip-hop culture platform · cyphertheculture.com',incomeTag:'cypher'},
-  ampm_design:{name:'AMPM Design Services',color:'#60A5FA',dot:'blue',desc:'Graphic design, web design, brand strategy',incomeTag:'ampm'},
 };
 
 function renderBizView(id){
@@ -3245,7 +3251,7 @@ function renderBizView(id){
   if(!cfg)return;
   const el=document.getElementById('biz-view-'+id);
   if(!el)return;
-  const txs=S.transactions.filter(t=>id==='ampm_all'?true:t.biz===cfg.incomeTag).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const txs=S.transactions.filter(t=>cfg.incomeTag==='all'?true:t.biz===cfg.incomeTag).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const income=txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
   const expense=txs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
   const net=income-expense;
@@ -3282,7 +3288,11 @@ function renderBizView(id){
   `;
 }
 function prefillTxBiz(biz){
-  document.getElementById('tx-biz').value=biz;
+  // Map old biz IDs to new transaction tags
+  var bizTagMap={'ampm_consulting':'ampm','ampm_print':'print','ampm_all':'ampm',
+                 'byop':'byop','nifty':'nifty','cypher':'cypher','print':'print'};
+  var tag=bizTagMap[biz]||biz;
+  document.getElementById('tx-biz').value=tag;
   document.getElementById('tx-date').value=new Date().toISOString().slice(0,10);
   document.getElementById('tx-desc').value='';
   document.getElementById('tx-amt').value='';
@@ -3292,7 +3302,8 @@ function deleteTx(desc,date){
   const idx=S.transactions.findIndex(t=>t.desc===desc&&t.date===date);
   if(idx>=0&&confirm('Delete this transaction?')){
     S.transactions.splice(idx,1);
-    saveState();renderRecentTx();renderAllTx();updateNWDisplay();renderCalendar();
+    const _nwSnap=calcNW();const _today=new Date().toISOString().slice(0,10);const _ex=S.nwHistory.findIndex(h=>h.date===_today);if(_ex>=0){S.nwHistory[_ex].value=_nwSnap.nw;}else{S.nwHistory.push({date:_today,value:_nwSnap.nw});}
+  saveState();renderRecentTx();renderAllTx();updateNWDisplay();renderCalendar();try{initNWChart();}catch(e){}try{initMixChartLive();}catch(e){}
     toast('Transaction deleted');
   }
 }
@@ -3346,7 +3357,12 @@ function showView(id){
 // MODALS
 // ══════════════════════════════════════════════════
 function openModal(id){document.getElementById(id).classList.add('open');}
-function closeModal(id){document.getElementById(id).classList.remove('open');}
+function closeModal(id){
+  var el=document.getElementById(id);
+  if(!el)return;
+  el.classList.remove('open');
+  el.style.display='';
+}
 document.querySelectorAll('.modal-overlay').forEach(m=>{
   m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');});
 });
