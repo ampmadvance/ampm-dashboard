@@ -1455,7 +1455,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
   </div>
   <div class="sb-section">
     <div class="sb-label">Overview</div>
-    <div class="sb-item active" onclick="nav(this,'overview');closeSidebarOnMobile()">
+    <div class="sb-item active" onclick="nav(this,'ampm_all');closeSidebarOnMobile()">
       <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       Net Worth Hub
     </div>
@@ -1475,6 +1475,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
     <div class="sb-item" onclick="nav(this,'byop');closeSidebarOnMobile()"><span class="dot" style="background:#C9A84C"></span>BYOP Vibes</div>
     <div class="sb-item" onclick="nav(this,'nifty');closeSidebarOnMobile()"><span class="dot" style="background:#14B8A6"></span>Nifty Thrifty</div>
     <div class="sb-item" onclick="nav(this,'cypher');closeSidebarOnMobile()"><span class="dot" style="background:#F472B6"></span>Cypher the Culture</div>
+        <div class="sb-item" onclick="nav(this,'ampm_consulting');closeSidebarOnMobile()"><div class="sb-dot" style="background:#F97316"></div>Consulting</div>
   </div>
   <div class="sb-section">
     <div class="sb-label">Tools</div>
@@ -1519,7 +1520,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
   <!-- BIZ TABS -->
   <div class="biz-tabs" id="biz-tabs-bar">
-    <button class="biz-tab active" data-view="overview" onclick="bizTab(this,'overview')">
+    <button class="biz-tab active" data-view="ampm_all" onclick="bizTab(this,'ampm_all')">
       <span class="tab-dot" style="background:var(--gold)"></span>AMPM Overview
     </button>
     <button class="biz-tab" data-view="byop" onclick="bizTab(this,'byop')">
@@ -2094,6 +2095,9 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
   </div>
   <div class="view" id="view-ampm_design">
     <div id="biz-view-ampm_design"></div>
+  </div>
+  <div class="view" id="view-ampm_consulting">
+    <div id="biz-view-ampm_consulting"></div>
   </div>
 
   </div><!-- /content -->
