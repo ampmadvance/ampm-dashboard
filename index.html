@@ -1308,11 +1308,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
 
 
-/* ═══════════════════════════════════════
-   CLEAN RESPONSIVE SYSTEM
-   Desktop: sidebar fixed left 220px
-   Mobile <700px: sidebar slide-over
-═══════════════════════════════════════ */
+
 
 /* BIZ TABS — always horizontal scroll */
 .biz-tabs{
@@ -1435,17 +1431,14 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 
 /* views must fill width */
 .view{width:100%;max-width:100%;box-sizing:border-box}
-/* prevent any horizontal overflow */
-.main{overflow-x:hidden}
-.content{overflow-x:hidden;width:100%}
-/* business view containers fill width */
-[id^="biz-view-"]{width:100%}
 
 
-/* ═══════════════════════════════════════════════════
-   DEFINITIVE LAYOUT — overrides all previous patches
-   Single source of truth for the dashboard layout
-═══════════════════════════════════════════════════ */
+
+
+
+
+
+
 
 /* Shell & main structure */
 .shell { display: block; min-height: 100vh; }
@@ -1455,7 +1448,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
   display: flex; flex-direction: column; z-index: 150; overflow-y: auto;
   transition: transform .28s cubic-bezier(.16,1,.3,1);
 }
-/* CRITICAL: NO overflow on .main — breaks position:sticky */
+
 .main {
   margin-left: 220px;
   min-height: 100vh;
@@ -1520,6 +1513,121 @@ button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;border:
 }
 @media (min-width: 701px) and (max-width: 960px) {
   
+}
+
+
+
+/* ═══════════════════════════════════════════════════════
+   VIEWPORT LAYOUT — the correct dashboard layout.
+   Shell fills 100vh. Content scrolls inside its own box.
+   Topbar + biz-tabs always visible, no sticky/fixed magic.
+═══════════════════════════════════════════════════════ */
+
+html, body { margin:0; padding:0; height:100%; overflow:hidden; }
+
+.shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 220px;
+  min-width: 220px;
+  flex-shrink: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Topbar never scrolls — it's outside the scroll container */
+.topbar {
+  flex-shrink: 0;
+  height: 54px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  gap: 10px;
+  background: rgba(10,10,11,0.98);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+
+/* Biz-tabs never scrolls — outside scroll container */
+.biz-tabs {
+  flex-shrink: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding: 0 20px;
+  background: rgba(10,10,11,0.98);
+  border-bottom: 1px solid var(--border);
+  z-index: 9;
+}
+.biz-tabs::-webkit-scrollbar { display: none; }
+.biz-tab { white-space: nowrap; flex-shrink: 0; }
+
+/* Content scrolls internally — no page scroll needed */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 24px;
+}
+
+.view { display: none; }
+.view.active { display: block; }
+
+/* Mobile */
+@media (max-width: 700px) {
+  .shell { position: relative; }
+  .sidebar {
+    position: fixed; top:0; left:0; bottom:0;
+    z-index: 150;
+    transform: translateX(-220px);
+    transition: transform .28s cubic-bezier(.16,1,.3,1);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 12px 0 48px rgba(0,0,0,.7);
+  }
+  .hamburger { display: flex !important; }
+  .topbar { padding: 0 12px; height: 50px; }
+  .biz-tabs { padding: 0 8px; height: 40px; }
+  .content { padding: 12px; }
+  .biz-tab { padding: 8px 10px; font-size: 11px; }
+  .g2,.g3,.g4 { grid-template-columns: 1fr !important; }
+  .kpi-row { grid-template-columns: 1fr 1fr !important; }
+  #overview-main-grid { flex-direction: column !important; }
+  #overview-main-grid > div { width: 100% !important; }
+  .chart-area { height: 120px; }
+  .nw-hero { padding: 14px 14px 10px; }
+  .nw-amount { font-size: 28px !important; }
+  #tb-date { display: none; }
+  .topbar .btn-sm.btn-ghost { display: none; }
+}
+@media (min-width: 701px) {
+  .hamburger { display: none !important; }
+  .sidebar { transform: none !important; position: relative; }
+  .sidebar-overlay { display: none !important; }
 }
 
 </style>
